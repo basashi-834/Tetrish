@@ -70,6 +70,16 @@ python3 -m http.server 8000
 > ES モジュールを使っているため、`index.html` をファイルとして直接開く（`file://`）と動きません。
 > かならず HTTP 経由で開いてください。
 
+### 単一 HTML にまとめる
+
+CSS と JS をすべて埋め込んだ 1 ファイルを書き出せます。
+サーバー不要で、ダブルクリックしただけで遊べます（メール添付やチャットで配るのに便利）。
+
+```sh
+node tools/bundle.mjs
+# → dist/tetrish.html
+```
+
 ### スマホで遊ぶ
 
 同じ Wi-Fi 上で PC の IP を指定してアクセスするか、GitHub Pages 等に置いてください。
@@ -109,6 +119,7 @@ js/
   input.js              キーボード（DAS/ARR）・タッチ・ボタン・ゲームパッド
   storage.js            設定とハイスコアの保存
 tests/engine.test.mjs   エンジンのテスト
+tools/bundle.mjs        単一HTMLへまとめるビルダー
 sw.js                   オフライン用 Service Worker
 ```
 
