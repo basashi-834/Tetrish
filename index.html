@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>TETRISH — ドパドパ落ちものパズル</title>
+<meta name="description" content="PC・スマホ両対応のブラウザ落ちものパズル。T-Spin、B2B、コンボ、パーフェクトクリア、そしてフィーバー。">
+<meta name="theme-color" content="#05060e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TETRISH">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="app" class="app">
+
+  <!-- ===== 上部バー ===== -->
+  <div class="topbar" id="topbar">
+    <button class="icon-btn" id="pauseBtn" aria-label="ポーズ">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>
+    </button>
+    <div class="topbar__title">TETRISH</div>
+    <div class="topbar__right">
+      <button class="icon-btn" id="musicBtn" aria-label="BGM切り替え" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>
+      </button>
+      <button class="icon-btn" id="sfxBtn" aria-label="効果音切り替え" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9a4 4 0 0 1 0 6"/></svg>
+      </button>
+    </div>
+  </div>
+
+
+  <!-- ===== ゲーム画面 ===== -->
+  <div class="stage" id="stage">
+
+    <!-- 左サイド：HOLD とスコア -->
+    <aside class="side side--left">
+      <div class="panel panel--hold">
+        <div class="panel__label">HOLD</div>
+        <canvas class="mini" id="holdCanvas"></canvas>
+      </div>
+
+      <div class="panel panel--stats">
+        <div class="stat stat--score">
+          <div class="stat__label">SCORE</div>
+          <div class="stat__value" id="scoreValue">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat__label">BEST</div>
+          <div class="stat__value stat__value--sm" id="bestValue">0</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat">
+            <div class="stat__label">LEVEL</div>
+            <div class="stat__value stat__value--sm" id="levelValue">1</div>
+          </div>
+          <div class="stat">
+            <div class="stat__label">LINES</div>
+            <div class="stat__value stat__value--sm" id="linesValue">0</div>
+          </div>
+        </div>
+        <div class="stat-row">
+          <div class="stat">
+            <div class="stat__label">TIME</div>
+            <div class="stat__value stat__value--sm" id="timeValue">0:00</div>
+          </div>
+          <div class="stat">
+            <div class="stat__label">PPS</div>
+            <div class="stat__value stat__value--sm" id="ppsValue">0.00</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中央：盤面 -->
+    <main class="board-area">
+      <div class="board-wrap" id="boardWrap">
+        <canvas id="board" class="board"></canvas>
+
+        <!-- 盤面に重ねる演出レイヤー -->
+        <div class="overlay" id="overlay" aria-hidden="true">
+          <div class="combo" id="comboDisplay">
+            <div class="combo__count" id="comboCount">2</div>
+            <div class="combo__label">COMBO</div>
+            <div class="combo__cheer" id="comboCheer"></div>
+          </div>
+          <div class="b2b" id="b2bDisplay">B2B <span id="b2bCount">1</span></div>
+          <div class="fever-banner" id="feverBanner">
+            <span>F</span><span>E</span><span>V</span><span>E</span><span>R</span>
+          </div>
+          <div class="ready-go" id="readyGo"></div>
+        </div>
+
+        <!-- タッチ操作を拾う透明レイヤー -->
+        <div class="touch-layer" id="touchLayer"></div>
+      </div>
+
+      <!-- ドパミンゲージ -->
+      <div class="fever-meter" id="feverMeter">
+        <div class="fever-meter__label">ドパミン</div>
+        <div class="fever-meter__track">
+          <div class="fever-meter__fill" id="feverFill"></div>
+          <div class="fever-meter__shine"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 右サイド：NEXT -->
+    <aside class="side side--right">
+      <div class="panel panel--next">
+        <div class="panel__label">NEXT</div>
+        <div class="next-list" id="nextList">
+          <canvas class="mini mini--next"></canvas>
+          <canvas class="mini mini--next mini--small"></canvas>
+          <canvas class="mini mini--next mini--small"></canvas>
+          <canvas class="mini mini--next mini--small"></canvas>
+          <canvas class="mini mini--next mini--small"></canvas>
+        </div>
+      </div>
+
+      <div class="panel panel--keys">
+        <div class="panel__label">KEYS</div>
+        <ul class="keys">
+          <li><kbd>←</kbd><kbd>→</kbd><span>移動</span></li>
+          <li><kbd>↓</kbd><span>ソフトドロップ</span></li>
+          <li><kbd>Space</kbd><span>ハードドロップ</span></li>
+          <li><kbd>↑</kbd><kbd>X</kbd><span>右回転</span></li>
+          <li><kbd>Z</kbd><span>左回転</span></li>
+          <li><kbd>C</kbd><span>ホールド</span></li>
+          <li><kbd>Esc</kbd><span>ポーズ</span></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ===== スマホ用コントローラ ===== -->
+  <div class="pad" id="pad">
+    <div class="pad__group pad__group--move">
+      <button class="pad__btn" data-action="left" data-repeat="true" aria-label="左へ移動">
+        <svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8"/></svg>
+      </button>
+      <button class="pad__btn" data-action="softDrop" data-repeat="true" aria-label="ソフトドロップ">
+        <svg viewBox="0 0 24 24"><path d="M12 4v14M6 13l6 6 6-6"/></svg>
+      </button>
+      <button class="pad__btn" data-action="right" data-repeat="true" aria-label="右へ移動">
+        <svg viewBox="0 0 24 24"><path d="M9 4l8 8-8 8"/></svg>
+      </button>
+    </div>
+    <div class="pad__group pad__group--act">
+      <button class="pad__btn pad__btn--hold" data-action="hold" aria-label="ホールド">
+        <svg viewBox="0 0 24 24"><path d="M5 5h6v14H5zM13 5h6v14h-6z"/></svg>
+      </button>
+      <button class="pad__btn" data-action="rotateCCW" aria-label="左回転">
+        <svg viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 2.3 5.7"/><path d="M3 4v6h6"/></svg>
+      </button>
+      <button class="pad__btn" data-action="rotateCW" aria-label="右回転">
+        <svg viewBox="0 0 24 24"><path d="M20 10a8 8 0 1 0-2.3 5.7"/><path d="M21 4v6h-6"/></svg>
+      </button>
+      <button class="pad__btn pad__btn--drop" data-action="hardDrop" aria-label="ハードドロップ">
+        <svg viewBox="0 0 24 24"><path d="M12 3v11M7 10l5 5 5-5M5 20h14"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== スクリーン群 ===== -->
+
+  <!-- タイトル -->
+  <section class="screen screen--title is-active" id="titleScreen">
+    <div class="screen__inner">
+      <h1 class="logo">
+        <span class="logo__main">TETRISH</span>
+        <span class="logo__sub">ドパドパ落ちものパズル</span>
+      </h1>
+
+      <div class="title-best">
+        <span>ハイスコア</span>
+        <strong id="titleBest">0</strong>
+      </div>
+
+      <div class="level-select">
+        <div class="level-select__label">スタートレベル</div>
+        <div class="level-select__controls">
+          <button class="lvl-btn" id="lvlDown" aria-label="レベルを下げる">−</button>
+          <div class="lvl-value" id="lvlValue">1</div>
+          <button class="lvl-btn" id="lvlUp" aria-label="レベルを上げる">＋</button>
+        </div>
+      </div>
+
+      <button class="btn btn--primary btn--huge" id="startBtn">
+        <span>START</span>
+      </button>
+
+      <div class="title-links">
+        <button class="btn btn--ghost" id="howtoBtn">あそびかた</button>
+        <button class="btn btn--ghost" id="settingsBtn">設定</button>
+      </div>
+
+      <p class="hint" id="deviceHint"></p>
+    </div>
+  </section>
+
+  <!-- ポーズ -->
+  <section class="screen screen--dim" id="pauseScreen">
+    <div class="screen__inner">
+      <h2 class="screen__title">PAUSED</h2>
+      <button class="btn btn--primary" id="resumeBtn">つづける</button>
+      <button class="btn btn--ghost" id="restartBtn">やりなおす</button>
+      <button class="btn btn--ghost" id="quitBtn">タイトルへ</button>
+    </div>
+  </section>
+
+  <!-- ゲームオーバー -->
+  <section class="screen screen--dim" id="overScreen">
+    <div class="screen__inner">
+      <h2 class="screen__title screen__title--over">GAME OVER</h2>
+      <div class="record-badge" id="recordBadge">🎉 NEW RECORD! 🎉</div>
+
+      <div class="result-score">
+        <div class="result-score__label">SCORE</div>
+        <div class="result-score__value" id="finalScore">0</div>
+      </div>
+
+      <div class="result-grid" id="resultGrid"></div>
+
+      <div class="rank" id="rankDisplay">
+        <span class="rank__label">RANK</span>
+        <span class="rank__value" id="rankValue">C</span>
+      </div>
+
+      <button class="btn btn--primary btn--huge" id="retryBtn">もう1回！</button>
+      <div class="title-links">
+        <button class="btn btn--ghost" id="shareBtn">結果をコピー</button>
+        <button class="btn btn--ghost" id="toTitleBtn">タイトルへ</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- あそびかた -->
+  <section class="screen screen--dim" id="howtoScreen">
+    <div class="screen__inner screen__inner--scroll">
+      <h2 class="screen__title">あそびかた</h2>
+
+      <h3 class="howto__h">スマホ</h3>
+      <ul class="howto">
+        <li><b>左右にドラッグ</b> — 指の動きにブロックが追従</li>
+        <li><b>下にドラッグ</b> — ソフトドロップ</li>
+        <li><b>下にフリック</b> — ハードドロップ（一気に落とす）</li>
+        <li><b>上にフリック</b> — ホールド</li>
+        <li><b>タップ</b> — 右回転（画面左端をタップで左回転）</li>
+        <li>下のボタンでも操作できます</li>
+      </ul>
+
+      <h3 class="howto__h">PC</h3>
+      <ul class="howto">
+        <li><kbd>←</kbd><kbd>→</kbd> 移動 / <kbd>↓</kbd> ソフトドロップ</li>
+        <li><kbd>Space</kbd> ハードドロップ</li>
+        <li><kbd>↑</kbd><kbd>X</kbd> 右回転 / <kbd>Z</kbd> 左回転 / <kbd>Q</kbd> 180°</li>
+        <li><kbd>C</kbd><kbd>Shift</kbd> ホールド / <kbd>Esc</kbd> ポーズ / <kbd>R</kbd> リスタート</li>
+        <li>ゲームパッドにも対応</li>
+      </ul>
+
+      <h3 class="howto__h">ドパドパ要素</h3>
+      <ul class="howto">
+        <li><b>COMBO</b> — 連続でライン消し。continue するほど音程も得点も上がる</li>
+        <li><b>T-SPIN</b> — Tミノを回転でねじ込む。得点が跳ね上がる</li>
+        <li><b>BACK-TO-BACK</b> — TETRIS / T-SPIN を連続で決めると 1.5 倍</li>
+        <li><b>PERFECT CLEAR</b> — 盤面を空っぽに。特大ボーナス＋紙吹雪</li>
+        <li><b>FEVER</b> — ドパミンゲージ満タンで発動。<b>スコア2倍</b>＋虹＋爆音</li>
+      </ul>
+
+      <button class="btn btn--primary" data-close-screen="howtoScreen">とじる</button>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section class="screen screen--dim" id="settingsScreen">
+    <div class="screen__inner screen__inner--scroll">
+      <h2 class="screen__title">設定</h2>
+
+      <label class="setting">
+        <span>BGM</span>
+        <input type="checkbox" id="setMusic" checked>
+        <span class="switch"></span>
+      </label>
+      <label class="setting">
+        <span>効果音</span>
+        <input type="checkbox" id="setSfx" checked>
+        <span class="switch"></span>
+      </label>
+      <label class="setting">
+        <span>バイブレーション</span>
+        <input type="checkbox" id="setVibe" checked>
+        <span class="switch"></span>
+      </label>
+      <label class="setting">
+        <span>ゴースト表示</span>
+        <input type="checkbox" id="setGhost" checked>
+        <span class="switch"></span>
+      </label>
+      <label class="setting">
+        <span>画面を揺らす</span>
+        <input type="checkbox" id="setShake" checked>
+        <span class="switch"></span>
+      </label>
+
+      <div class="setting setting--range">
+        <span>エフェクト量</span>
+        <select id="setQuality">
+          <option value="high">たっぷり</option>
+          <option value="mid">ふつう</option>
+          <option value="low">ひかえめ（軽い）</option>
+        </select>
+      </div>
+
+      <div class="setting setting--range">
+        <span>DAS（横溜め）<em id="dasLabel">133ms</em></span>
+        <input type="range" id="setDas" min="40" max="250" step="1" value="133">
+      </div>
+      <div class="setting setting--range">
+        <span>ARR（横連射）<em id="arrLabel">20ms</em></span>
+        <input type="range" id="setArr" min="0" max="100" step="1" value="20">
+      </div>
+      <div class="setting setting--range">
+        <span>スワイプ感度<em id="swipeLabel">1.0</em></span>
+        <input type="range" id="setSwipe" min="0.6" max="2" step="0.1" value="1">
+      </div>
+
+      <button class="btn btn--ghost" id="resetBestBtn">ハイスコアを消す</button>
+      <button class="btn btn--primary" data-close-screen="settingsScreen">とじる</button>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

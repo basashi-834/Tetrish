@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1024"/>
+      <stop offset="1" stop-color="#05060e"/>
+    </linearGradient>
+    <radialGradient id="g1" cx="18%" cy="15%" r="45%">
+      <stop offset="0" stop-color="#22e0ff" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#22e0ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="g2" cx="85%" cy="85%" r="45%">
+      <stop offset="0" stop-color="#c04dff" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#c04dff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#g1)"/>
+  <rect width="512" height="512" fill="url(#g2)"/>
+  <g filter="url(#glow)">
+    <rect x="76"  y="168" width="112" height="112" rx="22" fill="#22e0ff"/>
+    <rect x="200" y="168" width="112" height="112" rx="22" fill="#c04dff"/>
+    <rect x="324" y="168" width="112" height="112" rx="22" fill="#ff3465"/>
+    <rect x="200" y="292" width="112" height="112" rx="22" fill="#ffdc23"/>
+  </g>
+  <g fill="#fff" opacity=".38">
+    <rect x="94"  y="184" width="76" height="22" rx="11"/>
+    <rect x="218" y="184" width="76" height="22" rx="11"/>
+    <rect x="342" y="184" width="76" height="22" rx="11"/>
+    <rect x="218" y="308" width="76" height="22" rx="11"/>
+  </g>
+</svg>
