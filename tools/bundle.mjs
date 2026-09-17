@@ -8,7 +8,7 @@
  *   dist/tetrish.html          … 単体で開ける完全な HTML
  *   dist/tetrish.fragment.html … <head>/<body> を持たない埋め込み用
  */
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +23,7 @@ const MODULES = [
   'js/audio.js',
   'js/input.js',
   'js/storage.js',
+  'js/pachi.js',
   'js/main.js',
 ];
 
@@ -36,6 +37,21 @@ function stripModuleSyntax(code, name) {
     throw new Error(`${name}: 取り切れない import/export が残っている`);
   }
   return out;
+}
+
+// js/ に増えたモジュールを MODULES へ足し忘れると、
+// 未定義の識別子を参照して実行時に落ちる。ここで気づけるようにする。
+const onDisk = (await readdir(join(root, 'js')))
+  .filter((f) => f.endsWith('.js'))
+  .map((f) => `js/${f}`)
+  .sort();
+const missing = onDisk.filter((f) => !MODULES.includes(f));
+if (missing.length) {
+  throw new Error(`MODULES に入っていないモジュールがある: ${missing.join(', ')}`);
+}
+const stale = MODULES.filter((f) => !onDisk.includes(f));
+if (stale.length) {
+  throw new Error(`MODULES に存在しないファイルがある: ${stale.join(', ')}`);
 }
 
 const css = await readFile(join(root, 'css/style.css'), 'utf8');

@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: '20'
       - name: エンジンのテスト
-        run: node --test tests/
+        run: node --test
 
   deploy:
     needs: test

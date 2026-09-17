@@ -16,16 +16,24 @@ export class Effects {
     this.waves = [];
     this.beams = [];
     this.rowFlashes = [];
+    this.rays = [];
     this.shake = 0;
     this.shakeDecay = 0.88;
     this.shakeX = 0;
     this.shakeY = 0;
+    this.shakeRot = 0;
+    this.rotAmp = 0;          // 回転方向の揺れ量
     this.zoom = 1;
     this.zoomTarget = 1;
+    this.punch = 0;           // 弾けるようなズーム（減衰振動）
+    this.punchT = 0;
     this.flash = 0;
     this.flashColor = '#ffffff';
+    this.white = 0;           // ホワイトアウト（自然減衰しない）
+    this.whiteDecay = 0;
     this.chroma = 0;
     this.time = 0;
+    this.timeScale = 1;       // スロー演出用
     this.maxParticles = 560;
   }
 
@@ -34,11 +42,18 @@ export class Effects {
     this.waves.length = 0;
     this.beams.length = 0;
     this.rowFlashes.length = 0;
+    this.rays.length = 0;
     this.shake = 0;
+    this.rotAmp = 0;
+    this.shakeRot = 0;
     this.zoom = 1;
     this.zoomTarget = 1;
+    this.punch = 0;
     this.flash = 0;
+    this.white = 0;
+    this.whiteDecay = 0;
     this.chroma = 0;
+    this.timeScale = 1;
   }
 
   /** 端末性能に応じたパーティクル上限。 */
@@ -47,8 +62,42 @@ export class Effects {
     this.quality = level;
   }
 
-  addShake(amount) {
-    this.shake = Math.min(38, this.shake + amount);
+  /**
+   * 画面を揺らす。rot を渡すと回転方向にも揺れて、より「殴られた」感じになる。
+   */
+  addShake(amount, rot = 0) {
+    this.shake = Math.min(70, this.shake + amount);
+    if (rot) this.rotAmp = Math.min(0.09, this.rotAmp + rot);
+  }
+
+  /** 弾けるズーム。減衰振動なので「ドンッ」と入って戻る。 */
+  addPunch(amount) {
+    this.punch = Math.max(this.punch, amount);
+    this.punchT = 0;
+  }
+
+  /** 画面を白く飛ばす。decay=0 なら明示的に消すまで白いまま（白セカイ）。 */
+  whiteOut(alpha, decayPerSec = 2.2) {
+    this.white = Math.max(this.white, alpha);
+    this.whiteDecay = decayPerSec;
+  }
+
+  clearWhite(decayPerSec = 3.5) {
+    this.whiteDecay = decayPerSec;
+  }
+
+  /** 集中線。激アツ演出の定番。 */
+  addRays(opts = {}) {
+    this.rays.push({
+      life: opts.life ?? 700,
+      max: opts.life ?? 700,
+      color: opts.color ?? '#ffffff',
+      count: opts.count ?? 26,
+      spin: opts.spin ?? 0.0006,
+      width: opts.width ?? 0.028,
+      inner: opts.inner ?? 0.22,
+      phase: Math.random() * Math.PI * 2,
+    });
   }
 
   addFlash(alpha, color = '#ffffff') {
@@ -146,22 +195,46 @@ export class Effects {
   update(dt) {
     this.time += dt;
 
-    // シェイク：減衰しながらランダムオフセット
+    // シェイク：減衰しながらランダムオフセット＋回転
     if (this.shake > 0.05) {
       const s = this.shake;
       this.shakeX = rand(-s, s);
-      this.shakeY = rand(-s, s) * 0.7;
+      this.shakeY = rand(-s, s) * 0.8;
       this.shake *= Math.pow(this.shakeDecay, dt / 16.67);
     } else {
       this.shake = 0;
       this.shakeX = 0;
       this.shakeY = 0;
     }
+    if (this.rotAmp > 0.0004) {
+      this.shakeRot = rand(-this.rotAmp, this.rotAmp);
+      this.rotAmp *= Math.pow(0.86, dt / 16.67);
+    } else {
+      this.rotAmp = 0;
+      this.shakeRot = 0;
+    }
+
+    // パンチズーム：減衰する振動
+    if (this.punch > 0.001) {
+      this.punchT += dt;
+      this.punch *= Math.pow(0.9, dt / 16.67);
+      if (this.punch < 0.001) this.punch = 0;
+    }
 
     this.zoom += (this.zoomTarget - this.zoom) * Math.min(1, dt / 90);
     this.zoomTarget += (1 - this.zoomTarget) * Math.min(1, dt / 130);
     this.flash *= Math.pow(0.86, dt / 16.67);
     this.chroma *= Math.pow(0.9, dt / 16.67);
+    if (this.whiteDecay > 0) {
+      this.white = Math.max(0, this.white - this.whiteDecay * (dt / 1000));
+    }
+
+    for (let i = this.rays.length - 1; i >= 0; i--) {
+      const r = this.rays[i];
+      r.life -= dt;
+      r.phase += r.spin * dt;
+      if (r.life <= 0) this.rays.splice(i, 1);
+    }
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -196,6 +269,14 @@ export class Effects {
     }
   }
 
+  /** シェイクとパンチを合成した実効ズーム。 */
+  get effectiveZoom() {
+    const p = this.punch > 0
+      ? Math.cos(this.punchT * 0.032) * this.punch
+      : 0;
+    return this.zoom + p;
+  }
+
   /** 背面（盤面の下）に描くもの：ラインフラッシュ、ビーム。 */
   drawBack(ctx) {
     ctx.save();
@@ -216,6 +297,30 @@ export class Effects {
   drawFront(ctx) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+
+    // 集中線
+    if (this.rays.length) {
+      const cx = this.centerX ?? 0;
+      const cy = this.centerY ?? 0;
+      const R = this.radius ?? 400;
+      for (const r of this.rays) {
+        const k = r.life / r.max;
+        // 出はじめに一番濃く、すぐ落ち着く。盤面が見えなくならない程度に抑える
+        ctx.globalAlpha = Math.min(1, k * 1.6) * 0.26;
+        ctx.fillStyle = r.color;
+        for (let i = 0; i < r.count; i++) {
+          const a = r.phase + (i / r.count) * TAU;
+          const w = r.width * (0.5 + ((i * 7919) % 100) / 100);
+          const inner = R * (r.inner + (1 - k) * 0.5);
+          ctx.beginPath();
+          ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+          ctx.lineTo(cx + Math.cos(a - w) * R * 1.6, cy + Math.sin(a - w) * R * 1.6);
+          ctx.lineTo(cx + Math.cos(a + w) * R * 1.6, cy + Math.sin(a + w) * R * 1.6);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
 
     for (const f of this.rowFlashes) {
       const k = 1 - f.t / f.life;

@@ -16,6 +16,20 @@ function rgba(hex, a) {
   return `rgba(${r},${g},${b},${a})`;
 }
 
+/** 2色を t の割合で混ぜる。ボーナス中の色被せに使う。 */
+function mixHex(a, b, t) {
+  const x = hexToRgb(a);
+  const y = hexToRgb(b);
+  const m = (p, q) => Math.round(p + (q - p) * t);
+  return `rgb(${m(x.r, y.r)},${m(x.g, y.g)},${m(x.b, y.b)})`;
+}
+
+/** ボーナス種別ごとのブロック着色。REG は青寄り、BIG は金寄り。 */
+const BONUS_TINT = {
+  1: { hex: '#2ea8ff', amount: 0.4, edge: '#cfeeff' },
+  2: { hex: '#ffb020', amount: 0.5, edge: '#fff0c8' },
+};
+
 /** 角丸矩形パス。 */
 function roundRect(ctx, x, y, w, h, r) {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
@@ -145,16 +159,24 @@ export class Renderer {
   /** 1ブロック描画。スプライトを貼るだけなので安い。 */
   drawBlock(x, y, size, colors, opts = {}) {
     const ctx = this.ctx;
-    const { alpha = 1, glow = 0, scale = 1, fever = false, seed = 0 } = opts;
+    const { alpha = 1, glow = 0, scale = 1, rank = 0, seed = 0 } = opts;
     const s = size * scale;
     if (s < 1) return;                       // 非表示サイズなら描かない
 
     const px = Math.round(size);
     let sprite;
-    if (fever) {
-      const bucket = Math.floor(this.time * 0.02 + seed * 1.7) % FEVER_BUCKETS;
-      const b = (bucket + FEVER_BUCKETS) % FEVER_BUCKETS;
-      sprite = getSprite(`f${b}`, px, () => feverColors(b));
+    if (rank >= 3) {
+      // PREMIUM は虹。セルごとに位相をずらして流れるように見せる
+      const b = ((Math.floor(this.time * 0.024 + seed * 1.7) % FEVER_BUCKETS) + FEVER_BUCKETS) % FEVER_BUCKETS;
+      sprite = getSprite(`p${b}`, px, () => feverColors(b));
+    } else if (rank > 0) {
+      const tint = BONUS_TINT[rank];
+      sprite = getSprite(`${colors.base}~${rank}`, px, () => ({
+        base: mixHex(colors.base, tint.hex, tint.amount),
+        glow: mixHex(colors.glow, tint.hex, tint.amount * 0.6),
+        shade: mixHex(colors.base, tint.hex, tint.amount + 0.15),
+        edge: tint.edge,
+      }));
     } else {
       sprite = getSprite(colors.base, px, () => ({
         base: colors.base,
@@ -168,11 +190,40 @@ export class Renderer {
     ctx.globalAlpha = alpha;
     // 発光は操作中のピースなど数個だけに限る（全ブロックにかけると激重）
     if (glow > 0 && this.quality !== 'low') {
-      ctx.shadowColor = fever ? '#ffffff' : colors.glow;
+      ctx.shadowColor = rank >= 3 ? '#ffffff' : colors.glow;
       ctx.shadowBlur = glow * size * 0.5;
     }
     ctx.drawImage(sprite, x + (size - s) / 2, y + (size - s) / 2, s, s);
     ctx.restore();
+  }
+
+  /** ボーナス種別ごとの配色。REG=青、BIG=赤金、PREMIUM=虹。 */
+  bonusTheme(game) {
+    if (!game.bonus) return null;
+    const t = this.time;
+    switch (game.bonus.kind) {
+      case 'reg':
+        return {
+          top: `hsl(205, 80%, ${16 + Math.sin(t * 0.006) * 5}%)`,
+          bottom: 'hsl(225, 85%, 9%)',
+          accent: '#35b6ff',
+          stripe: 'rgba(60, 190, 255, 0.10)',
+        };
+      case 'big':
+        return {
+          top: `hsl(${12 + Math.sin(t * 0.008) * 8}, 90%, ${20 + Math.sin(t * 0.01) * 6}%)`,
+          bottom: 'hsl(345, 85%, 10%)',
+          accent: '#ff9d1f',
+          stripe: 'rgba(255, 170, 40, 0.13)',
+        };
+      default:
+        return {
+          top: `hsl(${(t * 0.22) % 360}, 75%, 20%)`,
+          bottom: `hsl(${(t * 0.22 + 120) % 360}, 75%, 11%)`,
+          accent: `hsl(${(t * 0.4) % 360}, 100%, 65%)`,
+          stripe: 'rgba(255, 255, 255, 0.13)',
+        };
+    }
   }
 
   /** 背景（グリッド・ネオンの霧・危険時の赤み）。 */
@@ -180,7 +231,8 @@ export class Renderer {
     const ctx = this.ctx;
     const { width: w, height: h, cell } = this;
     const danger = opts.danger;
-    const fever = game.feverActive;
+    const theme = this.bonusTheme(game);
+    const beat = opts.beat ?? 0;
 
     ctx.fillStyle = '#05060e';
     ctx.fillRect(0, 0, w, h);
@@ -192,9 +244,9 @@ export class Renderer {
 
     // 盤面ベース
     const g = ctx.createLinearGradient(bx, by, bx, by + bh);
-    if (fever) {
-      g.addColorStop(0, `hsla(${(this.time * 0.2) % 360},70%,18%,1)`);
-      g.addColorStop(1, `hsla(${(this.time * 0.2 + 90) % 360},70%,10%,1)`);
+    if (theme) {
+      g.addColorStop(0, theme.top);
+      g.addColorStop(1, theme.bottom);
     } else {
       g.addColorStop(0, '#0b1024');
       g.addColorStop(1, `rgb(${8 + danger * 40}, ${10 - danger * 4}, ${24 - danger * 8})`);
@@ -202,9 +254,35 @@ export class Renderer {
     ctx.fillStyle = g;
     ctx.fillRect(bx, by, bw, bh);
 
+    // ボーナス中は斜めのストライプを流す（パチスロ液晶の定番）
+    if (theme && this.quality !== 'low') {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(bx, by, bw, bh);
+      ctx.clip();
+      ctx.fillStyle = theme.stripe;
+      const sw = cell * 1.1;
+      const offset = (this.time * 0.12) % (sw * 2);
+      for (let x = -bh; x < bw + bh; x += sw * 2) {
+        ctx.beginPath();
+        ctx.moveTo(bx + x + offset, by);
+        ctx.lineTo(bx + x + offset + sw, by);
+        ctx.lineTo(bx + x + offset + sw - bh, by + bh);
+        ctx.lineTo(bx + x + offset - bh, by + bh);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // ビートに合わせて盤面全体が光る
+      if (beat > 0.001) {
+        ctx.fillStyle = `rgba(255,255,255,${beat * 0.13})`;
+        ctx.fillRect(bx, by, bw, bh);
+      }
+      ctx.restore();
+    }
+
     // グリッド
     ctx.save();
-    ctx.strokeStyle = fever ? 'rgba(255,255,255,0.12)' : 'rgba(120,160,255,0.09)';
+    ctx.strokeStyle = theme ? 'rgba(255,255,255,0.14)' : 'rgba(120,160,255,0.09)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let c = 1; c < COLS; c++) {
@@ -221,12 +299,12 @@ export class Renderer {
     ctx.restore();
 
     // ビートに合わせて走る光のライン
-    if (this.quality !== 'low') {
-      const beat = (this.time * 0.00035 * (fever ? 2.4 : 1)) % 1;
-      const ly = by + beat * bh;
+    if (this.quality !== 'low' && !theme) {
+      const sweep = (this.time * 0.00035) % 1;
+      const ly = by + sweep * bh;
       const lg = ctx.createLinearGradient(0, ly - cell, 0, ly + cell);
       lg.addColorStop(0, 'rgba(120,200,255,0)');
-      lg.addColorStop(0.5, fever ? 'rgba(255,255,255,0.16)' : 'rgba(120,200,255,0.1)');
+      lg.addColorStop(0.5, 'rgba(120,200,255,0.1)');
       lg.addColorStop(1, 'rgba(120,200,255,0)');
       ctx.fillStyle = lg;
       ctx.fillRect(bx, ly - cell, bw, cell * 2);
@@ -243,8 +321,8 @@ export class Renderer {
 
     // 枠
     ctx.save();
-    const edge = fever ? this.feverColor(0, 1) : 'rgba(120,190,255,1)';
-    ctx.globalAlpha = 0.22;
+    const edge = theme ? theme.accent : 'rgba(120,190,255,1)';
+    ctx.globalAlpha = 0.22 + beat * 0.5;
     ctx.strokeStyle = edge;
     ctx.lineWidth = Math.max(5, cell * 0.3);
     ctx.strokeRect(bx - 1, by - 1, bw + 2, bh + 2);
@@ -261,16 +339,25 @@ export class Renderer {
     const fx = this.effects;
     const cell = this.cell;
     const danger = opts.danger ?? 0;
+    const beat = opts.beat ?? 0;
+    const bonusRank = game.bonus ? game.bonus.rank : 0;
+
+    // 集中線の中心と半径を教えておく
+    fx.centerX = this.originX + cell * COLS / 2;
+    fx.centerY = this.originY + cell * VISIBLE_ROWS / 2;
+    fx.radius = Math.hypot(cell * COLS, cell * VISIBLE_ROWS) / 2;
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.drawBackground(game, { danger });
+    this.drawBackground(game, { danger, beat });
 
     ctx.save();
-    // シェイク＆ズーム
+    // シェイク＆ズーム＆回転
     const cx = this.width / 2;
     const cy = this.height / 2;
     ctx.translate(cx + fx.shakeX * this.dpr, cy + fx.shakeY * this.dpr);
-    ctx.scale(fx.zoom, fx.zoom);
+    if (fx.shakeRot) ctx.rotate(fx.shakeRot);
+    const zoom = fx.effectiveZoom;
+    ctx.scale(zoom, zoom);
     ctx.translate(-cx, -cy);
 
     // クリップして盤面外にはみ出さないように
@@ -303,7 +390,7 @@ export class Renderer {
           ctx.restore();
         } else {
           this.drawBlock(this.cellX(x), this.cellY(y), cell, colors, {
-            fever: game.feverActive,
+            rank: bonusRank,
             seed: x + y,
           });
         }
@@ -344,7 +431,7 @@ export class Renderer {
           glow: 0.5 + lockRatio * 0.9,
           scale: 1 - lockRatio * 0.04,
           alpha: 0.85 + pulse * 0.15,
-          fever: game.feverActive,
+          rank: bonusRank,
           seed: c.x + c.y,
         });
       }
@@ -353,11 +440,12 @@ export class Renderer {
     fx.drawFront(ctx);
     ctx.restore();
 
-    // 白フラッシュ
-    if (fx.flash > 0.01) {
+    // 白フラッシュとホワイトアウト
+    const white = Math.max(fx.flash, fx.white);
+    if (white > 0.01) {
       ctx.save();
-      ctx.globalAlpha = Math.min(1, fx.flash);
-      ctx.fillStyle = fx.flashColor;
+      ctx.globalAlpha = Math.min(1, white);
+      ctx.fillStyle = fx.white > fx.flash ? '#ffffff' : fx.flashColor;
       ctx.fillRect(0, 0, this.width, this.height);
       ctx.restore();
     }
@@ -408,7 +496,7 @@ export class Renderer {
         if (!matrix[y][x]) continue;
         r.drawBlock(ox + (x - minX) * cell, oy + (y - minY) * cell, cell,
           dim ? PIECE_COLORS.G : colors,
-          { glow: dim ? 0 : 0.3, alpha: dim ? 0.5 : 1, fever: options.fever, seed: x + y });
+          { glow: dim ? 0 : 0.3, alpha: dim ? 0.5 : 1, rank: options.rank || 0, seed: x + y });
       }
     }
   }

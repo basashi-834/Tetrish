@@ -15,6 +15,7 @@ const ASSETS = [
   'js/audio.js',
   'js/input.js',
   'js/storage.js',
+  'js/pachi.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',

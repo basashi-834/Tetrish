@@ -220,20 +220,129 @@ test('10ライン消すごとにレベルが上がる', () => {
   assert.equal(game.level, 2);
 });
 
-test('ドパミンゲージが満タンになるとフィーバーに入る', () => {
+test('CHANCEゲージが満タンになると抽選が走る', () => {
   const { game, last } = makeGame();
-  game.addFever(999);
-  assert.equal(game.feverActive, true);
-  assert.ok(last('feverStart'));
+  game.addChance(999);
+  const lottery = last('lottery');
+  assert.ok(lottery, 'lottery イベントが飛ぶ');
+  assert.ok(['reg', 'big', 'premium'].includes(lottery.data.kind));
+  assert.equal(game.chanceLocked, true, '演出が終わるまでゲージは止まる');
+  assert.equal(game.bonus, null, 'ボーナスは演出側の合図で始まる');
+});
 
+test('確定演出は抽選済みでも上位ボーナスへ昇格させる', () => {
+  const { game, last } = makeGame();
+  game.addChance(999);
+  game.pendingKind = 'reg';
+  game.triggerLottery('premium');
+  assert.equal(game.pendingKind, 'premium');
+  assert.ok(last('lotteryUpgrade'));
+
+  // 逆に下位へは落とさない
+  game.triggerLottery('reg');
+  assert.equal(game.pendingKind, 'premium');
+});
+
+test('ボーナス中はスコアが倍率ぶん増える', () => {
+  const { game } = makeGame();
   const before = game.score;
   game.applyScore(100);
-  const feverGain = game.score - before;
+  const plain = game.score - before;
 
-  game.endFever();
-  const before2 = game.score;
+  game.startBonus('big');
+  const b2 = game.score;
   game.applyScore(100);
-  assert.equal(feverGain, (game.score - before2) * 2, 'フィーバー中はスコア2倍');
+  const boosted = game.score - b2;
+
+  assert.equal(boosted, plain * 3, 'BIG は3倍');
+  assert.equal(game.bonus.gained, boosted, '獲得枚数に積まれる');
+});
+
+test('ボーナスはミノ1個につき1G減り、0で終わる', () => {
+  const { game, last } = makeGame();
+  game.startBonus('reg');
+  const total = game.bonus.games;
+  for (let i = 0; i < total - 1; i++) game.consumeBonusGame();
+  assert.equal(game.bonus.games, 1);
+  game.consumeBonusGame();
+  assert.equal(game.bonus, null);
+  assert.ok(last('bonusEnd'), 'bonusEnd が飛ぶ');
+});
+
+test('ボーナス中のライン消しは上乗せになる', () => {
+  const { game, last } = makeGame();
+  game.startBonus('big');
+  const before = game.bonus.games;
+
+  // TETRIS を決める（全消しにならないよう上にブロックを1つ残す）
+  for (let y = ROWS - 4; y < ROWS; y++) fillRow(game, y, [0]);
+  game.board[ROWS - 6][3] = 'J';
+  game.piece = game.makePiece('I');
+  game.piece.rotation = 1;
+  game.piece.x += 0 - game.cellsOf(game.piece)[0].x;
+  game.hardDrop();
+  settle(game);
+
+  const add = last('bonusAdd');
+  assert.ok(add, '上乗せイベントが飛ぶ');
+  assert.equal(add.data.reason, 'tetris');
+  // +30G から、消化した1G を引いた ぶんは増えている
+  assert.ok(game.bonus.games > before, `${before} → ${game.bonus.games}`);
+  assert.equal(game.chance, 0, 'ボーナス中はゲージが溜まらない');
+});
+
+test('パーフェクトクリアは PREMIUM 確定', () => {
+  const { game } = makeGame();
+  for (const y of [ROWS - 1, ROWS - 2]) fillRow(game, y, [4, 5]);
+  game.piece = game.makePiece('O');
+  game.piece.x = 4;
+  game.hardDrop();
+  settle(game);
+  assert.equal(game.pendingKind, 'premium');
+});
+
+test('最後の1Gのライン消しにも倍率が乗ってから終了する', () => {
+  const { game, last } = makeGame();
+  game.startBonus('reg');       // 12G ×2
+  game.bonus.games = 1;
+
+  fillRow(game, ROWS - 1, [4, 5]);
+  game.piece = game.makePiece('O');
+  game.piece.x = 4;
+  game.hardDrop();
+  settle(game);
+
+  // SINGLE = 100点。レベル1・REG(2倍) なので 200点入る
+  assert.equal(last('cleared').data.score, 200, '評価はG消化より先');
+  assert.equal(game.bonus, null, 'そのあと 1G 消化して終了');
+  assert.ok(last('bonusEnd'));
+});
+
+test('シングルでは上乗せせず、ボーナスがきちんと終わる', () => {
+  const { game } = makeGame();
+  game.startBonus('reg');
+  const start = game.bonus.games;
+
+  // シングルを何度も決める
+  for (let i = 0; i < start + 3 && game.bonus; i++) {
+    game.state = 'playing';
+    fillRow(game, ROWS - 1, [4, 5]);
+    game.board[ROWS - 2][4] = 0;
+    game.board[ROWS - 2][5] = 0;
+    game.piece = game.makePiece('O');
+    game.piece.x = 4;
+    game.hardDrop();
+    settle(game);
+  }
+  assert.equal(game.bonus, null, 'シングル連打でボーナスが無限に伸びない');
+});
+
+test('上乗せは上限で頭打ちになる', () => {
+  const { game } = makeGame();
+  game.startBonus('premium');
+  game.addBonusGames(5000, 'test');
+  assert.equal(game.bonus.games, 999);
+  assert.equal(game.addBonusGames(50, 'test'), 0, '上限に達したら0を返す');
 });
 
 test('180度回転にもキック候補がある', () => {

@@ -13,8 +13,26 @@ const LOCK_DELAY = 500;                 // ms
 const MAX_LOCK_RESETS = 15;
 const CLEAR_DELAY = 280;                // ライン消去演出の長さ(ms)
 const SPAWN_DELAY = 70;                 // ARE(ms)
-const FEVER_DURATION = 14000;           // フィーバー継続時間(ms)
-const FEVER_MAX = 100;                  // ドパミンゲージ満タン値
+const CHANCE_MAX = 100;                 // 抽選ゲージ満タン値
+
+/**
+ * ボーナスの種別。パチスロにならい、継続は時間ではなく「残りゲーム数(G)」で管理する。
+ * 1G = ミノ1個。ライン消しで上乗せされる。
+ */
+const BONUS_TYPES = {
+  reg: { label: 'REGULAR BONUS', short: 'REG', games: 12, mult: 2, rank: 1 },
+  big: { label: 'BIG BONUS', short: 'BIG', games: 30, mult: 3, rank: 2 },
+  premium: { label: 'PREMIUM BONUS', short: 'PREMIUM', games: 60, mult: 5, rank: 3 },
+};
+
+/**
+ * 上乗せG数。シングルでは乗らない。
+ * シングルでも乗せると「消化1G < 上乗せ」になってボーナスが永久に終わらない。
+ */
+const UWANOSE = [0, 0, 3, 8, 25];
+
+/** 上乗せの上限。青天井にすると倍率が破綻する。 */
+const MAX_BONUS_GAMES = 999;
 
 /** レベルごとの落下速度(1マスあたりのms)。ガイドライン準拠の式。 */
 function gravityMs(level) {
@@ -61,10 +79,11 @@ export class Game {
     this.pieceCount = 0;
     this.elapsed = 0;
 
-    this.fever = 0;               // 0..FEVER_MAX
-    this.feverActive = false;
-    this.feverTimer = 0;
-    this.feverCount = 0;
+    this.chance = 0;              // 抽選ゲージ 0..CHANCE_MAX
+    this.chanceLocked = false;    // ボーナス確定〜演出中はゲージを止める
+    this.bonus = null;            // { kind, games, gamesMax, mult, gained, label }
+    this.bonusCount = 0;
+    this.pendingKind = null;      // 抽選結果（演出が終わるまで保持）
 
     this.state = 'ready';         // ready | playing | clearing | spawning | paused | over
     this.gravityTimer = 0;
@@ -342,6 +361,7 @@ export class Game {
 
     if (cleared.length > 0) {
       this.pendingClear = this.evaluateClear(cleared, spin);
+      this.consumeBonusGame();   // 評価してから1G消化する
       this.clearingRows = cleared;
       this.state = 'clearing';
       this.phaseTimer = CLEAR_DELAY;
@@ -356,11 +376,12 @@ export class Game {
           score: gain,
           tier: 3,
         });
-        this.addFever(spin.mini ? 3 : 8);
+        this.addChance(spin.mini ? 4 : 10);
         this.stats.tspin++;
       } else {
         this.combo = -1;
       }
+      this.consumeBonusGame();
       this.state = 'spawning';
       this.phaseTimer = SPAWN_DELAY;
     }
@@ -418,12 +439,26 @@ export class Game {
     if (spin.tspin) this.stats.tspin++;
     if (perfect) this.stats.pc++;
 
-    // ドパミンゲージ
-    let feverGain = n * 5 + this.combo * 2;
-    if (spin.tspin) feverGain += 10;
-    if (n === 4) feverGain += 10;
-    if (perfect) feverGain += 40;
-    this.addFever(feverGain);
+    // 抽選ゲージと上乗せ
+    if (this.bonus) {
+      // ボーナス中はゲージではなくG数が増える（上乗せ）
+      let add = UWANOSE[n] || 0;
+      if (spin.tspin) add += 20;
+      if (perfect) add += 100;
+      if (add > 0 && this.combo >= 3) add = Math.floor(add * (1 + this.combo * 0.15));
+      if (add > 0) {
+        this.addBonusGames(add, spin.tspin ? 'tspin' : perfect ? 'perfect' : n === 4 ? 'tetris' : 'line');
+      }
+    } else {
+      let gain = n * 6 + this.combo * 3;
+      if (spin.tspin) gain += 14;
+      if (n === 4) gain += 16;
+      this.addChance(gain);
+      // パーフェクトクリアはボーナス確定（虹）
+      if (perfect) this.triggerLottery('premium');
+      // T-Spin トリプルは BIG 以上確定
+      else if (spin.tspin && n === 3) this.triggerLottery(Math.random() < 0.3 ? 'premium' : 'big');
+    }
 
     const newLevel = Math.floor(this.lines / 10) + 1;
     let leveledUp = false;
@@ -447,32 +482,98 @@ export class Game {
     };
   }
 
-  /** フィーバー倍率を掛けて加点し、実際の加算量を返す。 */
+  /** ボーナス倍率を掛けて加点し、実際の加算量を返す。 */
   applyScore(raw) {
-    const mult = this.feverActive ? 2 : 1;
+    const mult = this.bonus ? this.bonus.mult : 1;
     const gain = raw * this.level * mult;
     this.score += gain;
+    if (this.bonus) this.bonus.gained += gain;
     return gain;
   }
 
-  addFever(amount) {
-    if (this.feverActive) return;
-    this.fever = Math.min(FEVER_MAX, this.fever + amount);
-    if (this.fever >= FEVER_MAX) this.startFever();
+  get bonusActive() { return this.bonus !== null; }
+
+  /**
+   * 抽選ゲージを加算する。満タンになったら演出側へ通知するだけで、
+   * ボーナス開始は startBonus() を呼ばれるまで待つ（リール演出を挟むため）。
+   */
+  addChance(amount) {
+    if (this.bonus || this.chanceLocked) return;
+    this.chance = Math.min(CHANCE_MAX, this.chance + amount);
+    if (this.chance >= CHANCE_MAX) this.triggerLottery();
   }
 
-  startFever() {
-    this.feverActive = true;
-    this.feverTimer = FEVER_DURATION;
-    this.fever = FEVER_MAX;
-    this.feverCount++;
-    this.emit('feverStart', { count: this.feverCount });
+  /** ゲージ満タン。内部抽選を行い、演出側に結果を渡す。 */
+  triggerLottery(forced = null) {
+    if (this.bonus) return;
+    if (this.chanceLocked) {
+      // すでに抽選済みでも、確定演出なら上位へ昇格させる
+      if (forced && BONUS_TYPES[forced].rank > BONUS_TYPES[this.pendingKind].rank) {
+        this.pendingKind = forced;
+        this.emit('lotteryUpgrade', { kind: forced });
+      }
+      return;
+    }
+    this.chanceLocked = true;
+    this.chance = CHANCE_MAX;
+    this.pendingKind = forced || this.drawBonusKind();
+    this.emit('lottery', { kind: this.pendingKind, forced: !!forced });
   }
 
-  endFever() {
-    this.feverActive = false;
-    this.fever = 0;
-    this.emit('feverEnd', {});
+  /** どのボーナスを引いたか。レベルが上がるほど上位が出やすい。 */
+  drawBonusKind() {
+    const lucky = Math.min(0.22, this.level * 0.012);
+    const r = Math.random();
+    if (r < 0.06 + lucky * 0.5) return 'premium';
+    if (r < 0.42 + lucky) return 'big';
+    return 'reg';
+  }
+
+  /** 演出が終わったタイミングで演出側から呼ばれる。 */
+  startBonus(kind) {
+    const type = BONUS_TYPES[kind] || BONUS_TYPES.reg;
+    this.bonus = {
+      kind,
+      label: type.label,
+      short: type.short,
+      rank: type.rank,
+      mult: type.mult,
+      games: type.games,
+      gamesMax: type.games,
+      gained: 0,
+    };
+    this.bonusCount++;
+    this.chance = 0;
+    this.chanceLocked = false;
+    this.pendingKind = null;
+    this.emit('bonusStart', { ...this.bonus, count: this.bonusCount });
+  }
+
+  /** 上乗せ。ボーナス中のライン消しで残りGが増える。 */
+  addBonusGames(amount, reason) {
+    if (!this.bonus || amount <= 0) return 0;
+    const before = this.bonus.games;
+    this.bonus.games = Math.min(MAX_BONUS_GAMES, this.bonus.games + amount);
+    const added = this.bonus.games - before;
+    if (added <= 0) return 0;
+    this.bonus.gamesMax = Math.max(this.bonus.gamesMax, this.bonus.games);
+    this.emit('bonusAdd', { amount: added, reason, games: this.bonus.games });
+    return added;
+  }
+
+  /** 1G消化。ミノを固定するたびに呼ぶ。 */
+  consumeBonusGame() {
+    if (!this.bonus) return;
+    this.bonus.games--;
+    this.emit('bonusGame', { games: this.bonus.games });
+    if (this.bonus.games <= 0) this.endBonus();
+  }
+
+  endBonus() {
+    if (!this.bonus) return;
+    const result = { ...this.bonus, medals: Math.floor(this.bonus.gained / 10) };
+    this.bonus = null;
+    this.emit('bonusEnd', result);
   }
 
   /** 消去行を実際に取り除いて詰める。 */
@@ -532,12 +633,6 @@ export class Game {
     if (this.state === 'over' || this.state === 'ready' || this.state === 'paused') return;
     this.elapsed += dt;
 
-    if (this.feverActive) {
-      this.feverTimer -= dt;
-      this.fever = Math.max(0, (this.feverTimer / FEVER_DURATION) * FEVER_MAX);
-      if (this.feverTimer <= 0) this.endFever();
-    }
-
     if (this.state === 'clearing') {
       this.phaseTimer -= dt;
       if (this.phaseTimer <= 0) {
@@ -589,5 +684,5 @@ export class Game {
   }
 }
 
-export const CONFIG = { LOCK_DELAY, CLEAR_DELAY, FEVER_MAX, FEVER_DURATION };
+export const CONFIG = { LOCK_DELAY, CLEAR_DELAY, CHANCE_MAX, BONUS_TYPES, UWANOSE };
 export { gravityMs };

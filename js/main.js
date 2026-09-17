@@ -2,6 +2,7 @@
  * 全体の司令塔。エンジンのイベントを受けて、描画・音・振動・DOM演出へ配る。
  */
 import { Game, COLS, VISIBLE_ROWS, HIDDEN_ROWS, CONFIG } from './game.js';
+import { Director, REEL_STRIP, SYMBOL_LABEL } from './pachi.js';
 import { PIECE_COLORS } from './pieces.js';
 import { Renderer } from './renderer.js';
 import { Effects } from './effects.js';
@@ -26,15 +27,31 @@ const el = {
   lines: $('linesValue'),
   time: $('timeValue'),
   pps: $('ppsValue'),
-  feverMeter: $('feverMeter'),
-  feverFill: $('feverFill'),
+  meterRow: $('meterRow'),
+  chanceMeter: $('chanceMeter'),
+  chanceFill: $('chanceFill'),
   combo: $('comboDisplay'),
   comboCount: $('comboCount'),
   comboCheer: $('comboCheer'),
   b2b: $('b2bDisplay'),
   b2bCount: $('b2bCount'),
-  feverBanner: $('feverBanner'),
   readyGo: $('readyGo'),
+  lamp: $('lamp'),
+  stepUp: $('stepUp'),
+  stepUpNum: $('stepUpNum'),
+  stepUpText: $('stepUpText'),
+  bonusHud: $('bonusHud'),
+  bonusKind: $('bonusKind'),
+  bonusGames: $('bonusGames'),
+  bonusMedals: $('bonusMedals'),
+  uwanoseLayer: $('uwanoseLayer'),
+  cutin: $('cutin'),
+  cutinText: $('cutinText'),
+  reelStage: $('reelStage'),
+  reelCaption: $('reelCaption'),
+  resultBanner: $('resultBanner'),
+  resultBannerKind: $('resultBannerKind'),
+  resultBannerMedals: $('resultBannerMedals'),
   pad: $('pad'),
   toast: $('toast'),
   titleScreen: $('titleScreen'),
@@ -52,6 +69,7 @@ const el = {
 };
 
 const nextCanvases = Array.from(el.nextList.querySelectorAll('canvas'));
+const nextSlots = Array.from(el.nextList.querySelectorAll('.slot'));
 
 // --- 状態 --------------------------------------------------------------------
 
@@ -62,6 +80,7 @@ const settings = store.settings;
 
 let game;
 let input;
+let director;
 let running = false;
 let lastTime = 0;
 let displayScore = 0;      // スコア表示のロール用
@@ -111,6 +130,184 @@ function popText(text, sub, tier, yPercent = 45) {
   setTimeout(() => div.remove(), 1500);
 }
 
+// --- 演出用 DOM ヘルパー ---------------------------------------------------------
+// Director はここ経由でのみ DOM を触る。
+
+const STEP_TEXT = ['', 'チャンス', '熱い！', '激アツ！', '超激アツ！！'];
+const reelStrips = [];
+
+/** リールの図柄を敷き詰める。帯を3周ぶん並べて継ぎ目を見せない。 */
+function buildReels() {
+  const reels = el.reelStage.querySelectorAll('.reel');
+  reelStrips.length = 0;
+  for (const reel of reels) {
+    const strip = reel.querySelector('.reel__strip');
+    strip.innerHTML = '';
+    for (let copy = 0; copy < 3; copy++) {
+      for (const sym of REEL_STRIP) {
+        const d = document.createElement('div');
+        d.className = `sym sym--${sym}`;
+        const label = document.createElement('span');
+        label.textContent = SYMBOL_LABEL[sym];
+        d.appendChild(label);
+        strip.appendChild(d);
+      }
+    }
+    reelStrips.push({ strip, reel });
+  }
+}
+
+let reelSymH = 70;
+
+/**
+ * 図柄の高さは窓の1/3。
+ * getBoundingClientRect は登場アニメの scale を含んでしまうので offsetHeight を使う。
+ */
+function sizeReels() {
+  for (const { reel } of reelStrips) {
+    reelSymH = reel.offsetHeight / 3;
+    reel.style.setProperty('--sym-h', `${reelSymH}px`);
+  }
+}
+
+let cutinTimer = 0;
+let bannerTimer = 0;
+
+const ui = {
+  hideAll() {
+    el.reelStage.classList.remove('is-on');
+    el.cutin.classList.remove('is-on', 'is-out');
+    el.bonusHud.classList.remove('is-on', 'is-low');
+    el.resultBanner.classList.remove('is-on');
+    el.chanceMeter.style.display = '';
+    el.lamp.removeAttribute('data-state');
+    document.body.classList.remove('is-bonus', 'is-bonus-premium');
+    for (const slot of nextSlots) slot.removeAttribute('data-hold');
+  },
+
+  setLamp(state) {
+    if (state === 'off') el.lamp.removeAttribute('data-state');
+    else el.lamp.dataset.state = state;
+  },
+
+  setHolds(ranks) {
+    nextSlots.forEach((slot, i) => {
+      const rank = ranks[i] ?? 0;
+      if (rank > 0) slot.dataset.hold = rank;
+      else slot.removeAttribute('data-hold');
+    });
+  },
+
+  /** 操作中のミノの保留ランク。盤面の枠に反映する。 */
+  setActiveHold(rank, color) {
+    el.boardWrap.style.boxShadow = rank > 0
+      ? `0 0 ${10 + rank * 10}px ${color}, inset 0 0 ${8 + rank * 8}px ${color}`
+      : '';
+  },
+
+  flashHoldSlot(index) {
+    const slot = nextSlots[index];
+    if (!slot) return;
+    slot.classList.remove('is-flash');
+    void slot.offsetWidth;
+    slot.classList.add('is-flash');
+  },
+
+  // --- リール ---
+  showReels() {
+    el.reelStage.classList.add('is-on');
+    sizeReels();
+  },
+  hideReels() {
+    el.reelStage.classList.remove('is-on');
+    el.reelCaption.textContent = '';
+    el.reelCaption.classList.remove('is-hot');
+  },
+  setReels(positions) {
+    const N = REEL_STRIP.length;
+    const h = reelSymH;
+    reelStrips.forEach(({ strip }, i) => {
+      const p = ((positions[i] % N) + N) % N;
+      // 中央のコピーを基準にするので N ぶんずらす
+      strip.style.transform = `translateY(${(1 - (p + N)) * h}px)`;
+    });
+  },
+  setReelCaption(text) {
+    el.reelCaption.textContent = text;
+    el.reelCaption.classList.toggle('is-hot', /テンパイ|まだ|？/.test(text));
+  },
+
+  // --- カットイン ---
+  showCutIn(text, kind = 'sub') {
+    el.cutinText.textContent = text;
+    el.cutin.dataset.kind = kind;
+    el.cutin.classList.remove('is-on', 'is-out');
+    void el.cutin.offsetWidth;
+    el.cutin.classList.add('is-on');
+    clearTimeout(cutinTimer);
+    cutinTimer = setTimeout(() => {
+      el.cutin.classList.add('is-out');
+      setTimeout(() => el.cutin.classList.remove('is-on', 'is-out'), 320);
+    }, kind === 'sub' ? 700 : 1000);
+  },
+
+  // --- ステップアップ予告 ---
+  showStepUp(step) {
+    el.stepUp.dataset.step = step;
+    el.stepUpNum.textContent = step;
+    el.stepUpText.textContent = STEP_TEXT[step] || '';
+    el.stepUp.classList.remove('is-on');
+    void el.stepUp.offsetWidth;
+    el.stepUp.classList.add('is-on');
+  },
+
+  // --- ボーナスHUD ---
+  showBonusHud(b) {
+    el.bonusHud.dataset.kind = b.kind;
+    el.bonusKind.textContent = b.label;
+    el.bonusGames.textContent = b.games;
+    el.bonusMedals.textContent = '0';
+    el.bonusHud.classList.add('is-on');
+    el.bonusHud.classList.remove('is-low');
+    el.chanceMeter.style.display = 'none';
+    document.body.classList.add('is-bonus');
+    document.body.classList.toggle('is-bonus-premium', b.kind === 'premium');
+  },
+  hideBonusHud() {
+    el.bonusHud.classList.remove('is-on', 'is-low');
+    el.chanceMeter.style.display = '';
+    document.body.classList.remove('is-bonus', 'is-bonus-premium');
+  },
+  setBonusGames(games, bonus) {
+    el.bonusGames.textContent = Math.max(0, games);
+    el.bonusHud.classList.toggle('is-low', games <= 5);
+    if (bonus) el.bonusMedals.textContent = Math.floor(bonus.gained / 10).toLocaleString();
+  },
+  pulseBonusGames() {
+    bump(el.bonusGames);
+  },
+
+  // --- 上乗せ ---
+  showUwanose(amount, kind) {
+    const div = document.createElement('div');
+    div.className = `uwanose${kind === 'normal' ? '' : ` uwanose--${kind}`}`;
+    div.textContent = `+${amount}G`;
+    el.uwanoseLayer.appendChild(div);
+    setTimeout(() => div.remove(), 1500);
+  },
+
+  // --- ボーナス終了 ---
+  showResultBanner(result) {
+    el.resultBannerKind.textContent = `${result.label} 終了`;
+    el.resultBannerMedals.textContent = result.medals.toLocaleString();
+    el.resultBanner.classList.remove('is-on');
+    void el.resultBanner.offsetWidth;
+    el.resultBanner.classList.add('is-on');
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => el.resultBanner.classList.remove('is-on'), 2500);
+  },
+};
+
 // --- レイアウト ---------------------------------------------------------------
 
 /** 画面サイズから盤面の実寸を決めて CSS 変数に流し込む。 */
@@ -138,7 +335,8 @@ function layout() {
     return w;
   };
   const gap = parseFloat(getComputedStyle(el.stage).gap) || 10;
-  const meterH = 18;   // ドパミンゲージ＋余白
+  // ゲージ行の高さは盤面幅に依存しないので実測してよい
+  const meterH = Math.max(16, el.meterRow.getBoundingClientRect().height) + 4;
 
   let availW;
   let availH;
@@ -188,18 +386,18 @@ if (window.visualViewport) window.visualViewport.addEventListener('resize', sche
 
 function drawSidePanels(force = false) {
   if (!game) return;
-  const fever = game.feverActive;
-  const holdKey = `${game.hold}|${game.holdUsed}|${fever}`;
+  const rank = game.bonus ? game.bonus.rank : 0;
+  const holdKey = `${game.hold}|${game.holdUsed}|${rank}`;
   if (force || holdKey !== lastHold) {
     Renderer.drawMini(el.hold, game.hold, {
-      dim: game.holdUsed, quality: settings.quality, fever,
+      dim: game.holdUsed, quality: settings.quality, rank,
     });
     lastHold = holdKey;
   }
-  const nextKey = game.nextQueue.slice(0, nextCanvases.length).join(',') + `|${fever}`;
+  const nextKey = game.nextQueue.slice(0, nextCanvases.length).join(',') + `|${rank}`;
   if (force || nextKey !== lastNextKey) {
     nextCanvases.forEach((c, i) => {
-      Renderer.drawMini(c, game.nextQueue[i], { quality: settings.quality, fever });
+      Renderer.drawMini(c, game.nextQueue[i], { quality: settings.quality, rank });
     });
     lastNextKey = nextKey;
   }
@@ -215,11 +413,12 @@ function cellCenter(x, y) {
   };
 }
 
-function shakeIf(amount) {
-  if (settings.shake) effects.addShake(amount);
+function shakeIf(amount, rot = 0) {
+  if (settings.shake) effects.addShake(amount, rot);
 }
 
 function handleEvent(type, data) {
+  if (director) director.handle(type, data);
   switch (type) {
     case 'move':
       if (performance.now() - moveSoundThrottle > 18) {
@@ -310,8 +509,8 @@ function handleEvent(type, data) {
       audio.sfxLevelUp();
       popText(`LEVEL ${data.level}`, 'スピードアップ！', 3, 88);
       effects.addFlash(0.22, '#7fd8ff');
-      shakeIf(6);
-      effects.pulseZoom(0.03);
+      shakeIf(8, 0.01);
+      effects.addPunch(0.06);
       vibrate([0, 30, 40, 30]);
       bump(el.level);
       break;
@@ -321,16 +520,6 @@ function handleEvent(type, data) {
       popText(data.label, `+${data.score.toLocaleString()}`, data.tier, 42);
       audio.sfxClear(1, game.combo, true);
       shakeIf(5);
-      break;
-
-    case 'feverStart':
-      onFeverStart();
-      break;
-
-    case 'feverEnd':
-      document.body.classList.remove('is-fever');
-      el.feverMeter.classList.remove('is-fever');
-      audio.setIntensity(game.level, false);
       break;
 
     case 'gameover':
@@ -440,37 +629,13 @@ const CHEERS = [
   'すごい！', 'ヤバい！', '無双！', '神！！', '神！！！', 'ドパドパ！！！',
 ];
 
-function onFeverStart() {
-  document.body.classList.add('is-fever');
-  el.feverMeter.classList.add('is-fever');
-  el.feverBanner.classList.remove('is-on');
-  void el.feverBanner.offsetWidth;
-  el.feverBanner.classList.add('is-on');
-  setTimeout(() => el.feverBanner.classList.remove('is-on'), 1500);
-
-  effects.addFlash(0.7, '#ffffff');
-  shakeIf(26);
-  effects.pulseZoom(0.09);
-  effects.confetti(renderer.cellX(COLS / 2), renderer.originY + renderer.cell,
-    renderer.cell * COLS, 140);
-  for (let i = 0; i < 5; i++) {
-    setTimeout(() => {
-      effects.addWave(renderer.cellX(COLS / 2), renderer.originY + renderer.cell * 10, {
-        color: `hsl(${i * 70}, 100%, 65%)`, vr: 1.4, life: 700, width: 6, squash: 0.6,
-      });
-    }, i * 90);
-  }
-  popText('スコア2倍！', '', 4, 70);
-  audio.sfxFever();
-  audio.setIntensity(game.level, true);
-  vibrate([0, 60, 50, 60, 50, 120]);
-}
-
 function onGameOver(data) {
   running = false;
   audio.stopMusic();
+  audio.setTrack('normal');
+  ui.hideBonusHud();
   audio.sfxGameOver();
-  document.body.classList.remove('is-fever', 'is-danger');
+  document.body.classList.remove('is-bonus', 'is-bonus-premium', 'is-danger');
   shakeIf(24);
   effects.addFlash(0.5, '#ff3465');
   vibrate([0, 80, 60, 80, 60, 200]);
@@ -488,6 +653,7 @@ function onGameOver(data) {
     ['TETRIS', data.stats.tetris],
     ['T-SPIN', data.stats.tspin],
     ['PERFECT', data.stats.pc],
+    ['BONUS', game.bonusCount],
     ['PIECES', game.pieceCount],
     ['PPS', pps.toFixed(2)],
   ];
@@ -529,14 +695,19 @@ function loop(now) {
   lastTime = now;
   if (!game) return;
 
+  // 演出のタイムラインは止めない（フリーズ中もリールは回る）
+  director.update(dt);
+
   if (countdown > 0) {
     countdown -= dt;
-  } else if (running) {
+  } else if (running && !director.paused) {
     input.update(dt);
     game.update(dt);
   }
 
-  effects.update(dt);
+  // ヒットストップ中は演出だけを極端にゆっくりにして「止まった」ように見せる
+  const fxDt = director.hitStop > 0 ? dt * 0.12 : dt;
+  effects.update(fxDt);
 
   const danger = game.stackDanger();
   const wantDanger = running && danger > 0.45;
@@ -546,9 +717,10 @@ function loop(now) {
     if (dangerOn) audio.sfxDanger();
   }
 
-  renderer.render(game, dt, {
+  renderer.render(game, fxDt, {
     danger: running ? danger : 0,
     ghost: settings.ghost,
+    beat: game.bonus ? audio.beatPulse() : 0,
   });
 
   updateHud(dt);
@@ -568,25 +740,31 @@ function updateHud(dt) {
   const pps = game.pieceCount / Math.max(game.elapsed / 1000, 0.5);
   el.pps.textContent = pps.toFixed(2);
 
-  const pct = (game.fever / CONFIG.FEVER_MAX) * 100;
-  el.feverFill.style.width = `${pct}%`;
-  el.feverMeter.classList.toggle('is-full', pct >= 99 && !game.feverActive);
+  const pct = (game.chance / CONFIG.CHANCE_MAX) * 100;
+  el.chanceFill.style.width = `${pct}%`;
+  el.chanceMeter.classList.toggle('is-hot', pct >= 62);
+  if (game.bonus) ui.setBonusGames(game.bonus.games, game.bonus);
 
   drawSidePanels();
 }
 
 // --- 操作の橋渡し ---------------------------------------------------------------
 
+/** 演出でフリーズしている間は操作を受け付けない。 */
+function canAct() {
+  return running && countdown <= 0 && !director.paused;
+}
+
 const actions = {
-  move: (dx) => (running && countdown <= 0 ? game.move(dx) : false),
+  move: (dx) => (canAct() ? game.move(dx) : false),
   rotate: (dir) => {
-    if (!running || countdown > 0) return false;
+    if (!canAct()) return false;
     return game.rotate(dir === 2 ? 2 : dir);
   },
-  softDrop: () => (running && countdown <= 0 ? game.softDrop() : false),
+  softDrop: () => (canAct() ? game.softDrop() : false),
   setSoftDrop: () => {},
-  hardDrop: () => (running && countdown <= 0 ? game.hardDrop() : false),
-  hold: () => (running && countdown <= 0 ? game.holdPiece() : false),
+  hardDrop: () => (canAct() ? game.hardDrop() : false),
+  hold: () => (canAct() ? game.holdPiece() : false),
   pause: () => togglePause(),
   restart: () => { if (game.state !== 'ready') startGame(); },
 };
@@ -612,12 +790,13 @@ function startGame() {
   hideScreens();
   audio.init();
   effects.reset();
-  document.body.classList.remove('is-fever', 'is-danger');
+  document.body.classList.remove('is-bonus', 'is-bonus-premium', 'is-danger');
   el.b2b.classList.remove('is-on');
   el.combo.classList.remove('is-on');
   el.overlay.querySelectorAll('.pop').forEach((n) => n.remove());
 
   game.reset();
+  director.reset();
   game.level = startLevel;
   game.state = 'ready';
   displayScore = 0;
@@ -627,7 +806,8 @@ function startGame() {
   lastHold = null;
   drawSidePanels(true);
 
-  audio.setIntensity(startLevel, false);
+  audio.setIntensity(startLevel);
+  audio.setTrack('normal');
   audio.sfxStart();
 
   // READY? → GO!
@@ -656,9 +836,10 @@ function quitToTitle() {
   audio.stopMusic();
   game.state = 'ready';
   game.reset();
+  director.reset();
   displayScore = 0;
   el.score.textContent = '0';
-  document.body.classList.remove('is-fever', 'is-danger');
+  document.body.classList.remove('is-bonus', 'is-bonus-premium', 'is-danger');
   el.titleBest.textContent = store.data.best.toLocaleString();
   showScreen('titleScreen');
 }
@@ -687,6 +868,7 @@ function bindSettingsUI() {
     ['setVibe', 'vibrate'],
     ['setGhost', 'ghost'],
     ['setShake', 'shake'],
+    ['setHitstop', 'hitstop'],
   ];
   for (const [id, key] of toggles) {
     const node = $(id);
@@ -812,6 +994,10 @@ function bindUI() {
 
 function init() {
   game = new Game({ emit: handleEvent });
+  buildReels();
+  director = new Director({
+    game, effects, audio, ui, settings, vibrate,
+  });
   input = new InputManager(actions, {
     das: settings.das, arr: settings.arr, swipeSensitivity: settings.swipe,
   });
@@ -835,7 +1021,7 @@ function init() {
     : '←→ 移動・Space 一気落とし・↑ 回転・C ホールド';
 
   // デバッグ／自動テスト用のフック
-  window.__tetrish = { game, effects, renderer, audio, input, store, startGame, actions };
+  window.__tetrish = { game, effects, renderer, audio, input, store, startGame, actions, director, ui };
 
   layout();
   drawSidePanels(true);

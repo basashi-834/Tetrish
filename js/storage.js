@@ -12,6 +12,7 @@ const DEFAULTS = {
     vibrate: true,
     ghost: true,
     shake: true,
+    hitstop: true,
     quality: 'high',
     das: 133,
     arr: 20,
