@@ -9,86 +9,121 @@ const freq = (n) => 440 * Math.pow(2, (n - MIDI_A4) / 12);
 
 // --- BGM ---------------------------------------------------------------------
 // 1小節 = 16ステップ（16分音符）。曲は「通常」「前兆」「ボーナス」の3トラック。
-// 音名は MIDI ノート番号、null は休符。
+// 音名は MIDI ノート番号、_ は休符。
 
-/** Am - F - C - G。上がる進行なので素直に気持ちいい。 */
-const PROG_ROOTS = [45, 41, 48, 43];
-const PROG_CHORDS = [
-  [57, 60, 64],   // Am
-  [53, 57, 60],   // F
-  [48, 52, 55],   // C
-  [55, 59, 62],   // G
-];
+const _ = null;
 
-/** 通常時：控えめに転がすグルーヴ。 */
-const NORMAL = {
-  bpm: 148,
-  swing: 0,
-  bass: [
-    [45, null, 45, null, 45, null, 45, null, 43, null, 43, null, 43, null, 43, null],
-    [41, null, 41, null, 41, null, 41, null, 40, null, 40, null, 40, null, 43, 44],
-    [45, null, 45, null, 48, null, 45, null, 43, null, 43, null, 46, null, 43, null],
-    [41, null, 41, null, 44, null, 41, null, 40, null, 40, null, 40, 42, 43, 44],
-  ],
-  lead: [
-    [69, 72, 76, 72, 69, 72, 76, 79, 76, 72, 69, 72, 74, 71, 67, 71],
-    [65, 69, 72, 69, 65, 69, 72, 76, 72, 69, 65, 69, 68, 71, 64, 68],
-    [69, 76, 81, 76, 69, 76, 81, 84, 81, 76, 72, 76, 74, 78, 81, 78],
-    [65, 72, 77, 72, 68, 71, 76, 71, 67, 71, 76, 71, 68, 71, 64, 68],
-  ],
-  kick: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0],
-  snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
-  hat: [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1],
-  openHat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  gain: 0.9,
+/**
+ * コードは「隣の和音と共通音を残す」積み方にしてある。
+ * 転回を無視して積むと声部が10半音以上跳ね回り、何を弾いているのか
+ * 輪郭が取れなくなる。
+ */
+const CHORD = {
+  Am: [57, 60, 64],   // A3 C4 E4
+  F:  [53, 57, 60],   // F3 A3 C4   … Am と A,C が共通
+  G:  [55, 59, 62],   // G3 B3 D4
+  C:  [55, 60, 64],   // G3 C4 E4   … 第2転回。Am と C,E が共通
+  E:  [56, 59, 64],   // G#3 B3 E4  … ハーモニックマイナーの緊張
 };
 
-/** 前兆：通常曲を半分に間引き、代わりに緊張を積む。 */
-const TENSION = {
-  bpm: 152,
-  bass: [
-    [45, null, null, null, 45, null, null, null, 45, null, null, null, 45, null, 45, 45],
-    [44, null, null, null, 44, null, null, null, 44, null, null, null, 44, null, 44, 44],
-    [43, null, null, null, 43, null, null, null, 43, null, null, null, 43, null, 43, 43],
-    [42, null, null, null, 42, null, null, null, 42, null, null, null, 42, 42, 42, 42],
-  ],
+/** ベースのルート音。 */
+const ROOT = { Am: 45, F: 41, G: 43, C: 48, E: 40 };
+
+/**
+ * アルペジオは8ステップで1周させ、拍にロックさせる。
+ * コード構成音3つを16ステップに敷くと 3 対 4 になって拍とぶつかる。
+ */
+const ARP_STEPS = [0, 1, 2, 3, 2, 1, 0, 1];   // 3 = ルートの1オクターブ上
+
+// --- 通常時 ------------------------------------------------------------------
+// ボーナスとの落差が命なので、あえて音数を絞って淡々と回す。
+
+const NORMAL = {
+  bpm: 146,
+  bars: 4,
+  prog: ['Am', 'F', 'C', 'G'],
   lead: [
-    [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-    [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-    [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-    [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+    [69,  _,  _, 72,  _,  _, 76,  _,  _,  _, 74,  _, 72,  _,  _,  _],
+    [65,  _,  _, 69,  _,  _, 72,  _,  _,  _, 74,  _, 72,  _,  _,  _],
+    [64,  _,  _, 67,  _,  _, 72,  _,  _,  _, 71,  _, 67,  _,  _,  _],
+    [67,  _,  _, 71,  _,  _, 74,  _,  _,  _, 72,  _, 71,  _, 69,  _],
   ],
+  // 0=休 1=ルート 2=オクターブ上
+  bass: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0],
+  kick: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+  snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+  hat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+  openHat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  chord: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  arp: false,
+  gain: 0.85,
+  leadHold: 0.55,
+};
+
+// --- 前兆 --------------------------------------------------------------------
+// メロディを引っこ抜いて、代わりにライザーとタムで不安を積む。
+
+const TENSION = {
+  bpm: 150,
+  bars: 4,
+  prog: ['Am', 'Am', 'E', 'E'],
+  lead: [
+    [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+    [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+    [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+    [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+  ],
+  bass: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1],
   kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
   snare: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   hat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1],
   openHat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  chord: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   toms: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+  arp: false,
   riser: true,
-  gain: 0.85,
+  gain: 0.8,
+  leadHold: 0,
 };
 
-/**
- * ボーナス：4つ打ち＋オフビートベース＋スーパーソウのコード刻み。
- * いわゆるユーロビート/トランスの構成で、これが「ドパドパ」の正体。
- */
+// --- ボーナス ----------------------------------------------------------------
+// 4つ打ち＋ガロップベース＋オフビートのコード刻み。ユーロビートの型。
+// 8小節で「呼びかけ → 応答 → 展開 → 着地 → 1オクターブ上で再提示 → 頂点 → 下降」。
+
 const BONUS = {
-  bpm: 174,
-  // ベースは4分のキックを避けて走る（ガロップ）
-  bassStep: (i) => i % 4 !== 0,
-  bassOctave: (i) => (i % 4 === 2 ? 12 : 0),
+  bpm: 172,
+  bars: 8,
+  prog: ['Am', 'F', 'G', 'Am', 'F', 'G', 'Am', 'E'],
   lead: [
-    [81, null, 81, 79, 76, null, 79, 81, 84, null, 81, 79, 76, null, 72, 74],
-    [77, null, 77, 76, 72, null, 76, 77, 81, null, 77, 76, 72, null, 69, 71],
-    [79, null, 79, 76, 72, null, 76, 79, 84, null, 83, 79, 76, null, 79, 83],
-    [86, 84, 83, 79, 76, 79, 83, 86, 88, 86, 83, 79, 83, 86, 88, 91],
+    // 呼びかけ。ここのリズムがフックなので、後で何度も繰り返す
+    [ _,  _, 81, 81,  _, 79,  _, 76,  _,  _, 79,  _, 81,  _,  _,  _],
+    // 応答。同じリズムを4度下げて返す
+    [ _,  _, 77, 77,  _, 76,  _, 72,  _,  _, 74,  _, 76,  _,  _,  _],
+    // 展開。登っていく
+    [ _,  _, 79, 79,  _, 81,  _, 83,  _, 84,  _, 83, 81,  _, 79,  _],
+    // 着地。伸ばして息継ぎを作る
+    [81,  _,  _,  _,  _,  _, 76,  _, 77,  _, 79,  _, 81,  _,  _,  _],
+    // 呼びかけを上の音域で再提示
+    [ _,  _, 84, 84,  _, 81,  _, 77,  _,  _, 79,  _, 81,  _,  _,  _],
+    [ _,  _, 86, 86,  _, 83,  _, 79,  _,  _, 81,  _, 83,  _,  _,  _],
+    // 頂点
+    [88,  _, 86,  _, 84,  _, 81,  _, 84,  _, 86,  _, 88,  _, 86,  _],
+    // 駆け下りて頭へ戻る（G# が A を引っ張る）
+    [88,  _, 86,  _, 84,  _, 80,  _, 83,  _, 80,  _, 76,  _, 71,  _],
   ],
+  // ガロップベース：キックの裏に16分を2つ差し込む
+  bass: [0, 0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2],
   kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
   clap: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
   hat: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   openHat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-  chord: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1],
+  // オフビートのコード刻み
+  chord: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
   arp: true,
-  gain: 1.15,
+  sub: true,        // 小節頭に伸びるサブベース
+  crashBars: [0, 4],
+  gain: 1.1,
+  leadHold: 0.72,   // リードは伸ばす。プツプツ切ると歌にならない
 };
 
 const TRACKS = { normal: NORMAL, tension: TENSION, bonus: BONUS };
@@ -148,6 +183,17 @@ export class AudioEngine {
     this.delay.connect(this.delayMix);
     this.delayMix.connect(this.comp);
 
+    // リードとコードはローパスを通す。生のノコギリ波は倍音がきつく、
+    // 高い音域で耳に刺さる
+    this.leadBus = this.ctx.createGain();
+    this.leadBus.gain.value = 1;
+    this.leadFilter = this.ctx.createBiquadFilter();
+    this.leadFilter.type = 'lowpass';
+    this.leadFilter.frequency.value = 5200;
+    this.leadFilter.Q.value = 0.7;
+    this.leadBus.connect(this.leadFilter);
+    this.leadFilter.connect(this.musicGain);
+
     this.musicGain.connect(this.comp);
     this.sfxGain.connect(this.comp);
     this.sfxGain.connect(this.delay);
@@ -180,12 +226,17 @@ export class AudioEngine {
 
   // --- 汎用ボイス ------------------------------------------------------------
 
-  /** 単純なエンベロープ付きオシレータ。 */
+  /**
+   * エンベロープ付きオシレータ。
+   * hold に 0..1 を渡すと、その割合だけ音量を保ってから減衰する。
+   * 0 のままだと全部が「ポン」と減衰するだけの撥弦音になり、
+   * 伸ばすべきメロディが歌わない。
+   */
   tone(opts) {
     if (!this.ready) return;
     const {
       f0, f1, type = 'square', t0 = this.now, dur = 0.12,
-      gain = 0.3, attack = 0.004, dest = this.sfxGain, detune = 0,
+      gain = 0.3, attack = 0.004, dest = this.sfxGain, detune = 0, hold = 0,
     } = opts;
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
@@ -193,9 +244,17 @@ export class AudioEngine {
     osc.detune.value = detune;
     osc.frequency.setValueAtTime(f0, t0);
     if (f1 && f1 !== f0) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(gain, t0 + attack);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    if (hold > 0) {
+      const sustainUntil = t0 + Math.max(attack + 0.005, dur * hold);
+      g.gain.setValueAtTime(gain, sustainUntil);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    } else {
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    }
+
     osc.connect(g);
     g.connect(dest);
     osc.start(t0);
@@ -514,109 +573,140 @@ export class AudioEngine {
         this.beatLen = stepDur * 4;
       }
       this.nextNoteTime += stepDur;
-      this.step = (this.step + 1) % 64;
+      this.step = (this.step + 1) % 128;
     }
   }
 
   playStep(step, t, stepDur) {
     const track = TRACKS[this.track] || NORMAL;
-    if (this.track === 'bonus') this.playBonusStep(track, step, t, stepDur);
-    else this.playGrooveStep(track, step, t, stepDur);
+    const bar = (step >> 4) % track.bars;
+    const i = step & 15;
+    const name = track.prog[bar];
+    const chord = CHORD[name];
+    const root = ROOT[name];
+
+    this.playDrums(track, i, bar, t);
+    this.playBassLine(track, i, root, t, stepDur);
+    this.playChords(track, i, chord, t, stepDur);
+    this.playArp(track, i, chord, t, stepDur);
+    this.playLead(track, bar, i, t, stepDur);
   }
 
-  /** 通常／前兆トラック。 */
-  playGrooveStep(track, step, t, stepDur) {
-    const bar = (step >> 4) & 3;
-    const i = step & 15;
-    const g = this.musicGain;
-    const inten = this.intensity;
-    const vol = track.gain;
-
-    const b = track.bass[bar][i];
-    if (b !== null) {
-      this.tone({ f0: freq(b - 12), type: 'sawtooth', dur: stepDur * 1.9, gain: (0.3 + inten * 0.08) * vol, t0: t, dest: g });
-      this.tone({ f0: freq(b - 24), type: 'sine', dur: stepDur * 2.1, gain: 0.26 * vol, t0: t, dest: g });
-    }
-
-    const l = track.lead[bar][i];
-    if (l !== null) {
-      this.tone({ f0: freq(l), type: 'square', dur: stepDur * 1.15, gain: (0.13 + inten * 0.05) * vol, t0: t, dest: g });
-    }
-
-    if (track.kick[i]) this.tone({ f0: 150, f1: 42, type: 'sine', dur: 0.14, gain: 0.5 * vol, t0: t, dest: g });
-    if (track.snare && track.snare[i]) {
-      this.noise({ t0: t, dur: 0.12, gain: 0.24 * vol, freq: 2200, q: 0.9, type: 'bandpass', dest: g });
-    }
-    if (track.hat[i] && inten > 0.05) {
-      this.noise({ t0: t, dur: 0.035, gain: 0.09 * vol, freq: 9000, q: 1.4, type: 'highpass', dest: g });
-    }
-    if (track.toms && track.toms[i]) {
-      this.tone({ f0: 180 + i * 14, f1: 90, type: 'sine', dur: 0.16, gain: 0.4 * vol, t0: t, dest: g });
-    }
-    // 前兆は小節ごとに上がっていくライザーを重ねる
-    if (track.riser && i === 0) {
-      this.noise({ t0: t, dur: stepDur * 16, gain: 0.13 * vol, freq: 300, sweepTo: 6000, q: 1.4, type: 'bandpass', dest: g });
-    }
-  }
-
-  /** ボーナストラック。4つ打ち＋オフビートベース＋スーパーソウ。 */
-  playBonusStep(track, step, t, stepDur) {
-    const bar = (step >> 4) & 3;
-    const i = step & 15;
+  playDrums(track, i, bar, t) {
     const g = this.musicGain;
     const vol = track.gain;
-    const root = PROG_ROOTS[bar];
-    const chord = PROG_CHORDS[bar];
+    const bonus = this.track === 'bonus';
 
-    // 4つ打ちキック
     if (track.kick[i]) {
-      this.tone({ f0: 180, f1: 44, type: 'sine', dur: 0.16, gain: 0.72 * vol, t0: t, dest: g });
-      this.noise({ t0: t, dur: 0.03, gain: 0.22 * vol, freq: 4000, q: 1, type: 'bandpass', dest: g });
-    }
-
-    // オフビートで走るベース
-    if (track.bassStep(i)) {
-      const n = root - 12 + track.bassOctave(i);
-      this.tone({ f0: freq(n), type: 'sawtooth', dur: stepDur * 0.82, gain: 0.34 * vol, t0: t, dest: g });
-      this.tone({ f0: freq(n - 12), type: 'sine', dur: stepDur * 0.9, gain: 0.22 * vol, t0: t, dest: g });
-    }
-
-    // スーパーソウのコード刻み（3声をデチューンして重ねる）
-    if (track.chord[i]) {
-      for (const n of chord) {
-        for (const d of [-11, 0, 11]) {
-          this.tone({
-            f0: freq(n + 12), type: 'sawtooth', dur: stepDur * 1.5,
-            gain: 0.075 * vol, t0: t, dest: g, detune: d,
-          });
-        }
+      this.tone({
+        f0: bonus ? 180 : 150, f1: bonus ? 44 : 42, type: 'sine',
+        dur: bonus ? 0.16 : 0.14, gain: (bonus ? 0.72 : 0.5) * vol, t0: t, dest: g,
+      });
+      if (bonus) {
+        this.noise({ t0: t, dur: 0.03, gain: 0.22 * vol, freq: 4000, q: 1, type: 'bandpass', dest: g });
       }
     }
 
-    // 16分のアルペジオ
-    if (track.arp) {
-      const n = chord[i % chord.length] + 24;
-      this.tone({ f0: freq(n), type: 'square', dur: stepDur * 0.5, gain: 0.07 * vol, t0: t, dest: g });
-    }
-
-    // リード
-    const l = track.lead[bar][i];
-    if (l !== null) {
-      this.tone({ f0: freq(l), type: 'sawtooth', dur: stepDur * 1.2, gain: 0.17 * vol, t0: t, dest: g });
-      this.tone({ f0: freq(l), type: 'square', dur: stepDur * 1.2, gain: 0.09 * vol, t0: t, dest: g, detune: 7 });
-    }
-
-    if (track.clap[i]) {
+    // クラップは短いノイズを3連で重ねて厚みを出す
+    if (track.clap && track.clap[i]) {
       for (let k = 0; k < 3; k++) {
         this.noise({ t0: t + k * 0.011, dur: 0.06, gain: 0.2 * vol, freq: 1800, q: 1.1, type: 'bandpass', dest: g });
       }
       this.noise({ t0: t, dur: 0.16, gain: 0.16 * vol, freq: 3000, q: 0.7, type: 'bandpass', dest: g });
     }
+    if (track.snare && track.snare[i]) {
+      this.noise({ t0: t, dur: 0.12, gain: 0.24 * vol, freq: 2200, q: 0.9, type: 'bandpass', dest: g });
+    }
     if (track.hat[i]) {
-      this.noise({ t0: t, dur: 0.028, gain: 0.08 * vol, freq: 10000, q: 1.5, type: 'highpass', dest: g });
+      this.noise({ t0: t, dur: 0.028, gain: 0.075 * vol, freq: 10000, q: 1.5, type: 'highpass', dest: g });
     }
     if (track.openHat[i]) {
-      this.noise({ t0: t, dur: 0.13, gain: 0.12 * vol, freq: 8000, q: 1.1, type: 'highpass', dest: g });
+      this.noise({ t0: t, dur: 0.13, gain: 0.11 * vol, freq: 8000, q: 1.1, type: 'highpass', dest: g });
+    }
+    if (track.toms && track.toms[i]) {
+      this.tone({ f0: 180 + i * 14, f1: 90, type: 'sine', dur: 0.16, gain: 0.4 * vol, t0: t, dest: g });
+    }
+    // 8小節ループの頭にクラッシュを置いて区切りを作る
+    if (track.crashBars && track.crashBars.includes(bar) && i === 0) {
+      this.noise({ t0: t, dur: 0.9, gain: 0.16 * vol, freq: 6000, q: 0.6, type: 'highpass', dest: g });
+    }
+    if (track.riser && i === 0) {
+      this.noise({
+        t0: t, dur: (60 / this.bpm / 4) * 16, gain: 0.13 * vol,
+        freq: 300, sweepTo: 6000, q: 1.4, type: 'bandpass', dest: g,
+      });
+    }
+  }
+
+  playBassLine(track, i, root, t, stepDur) {
+    const g = this.musicGain;
+    const vol = track.gain;
+    const kind = track.bass[i];
+
+    // 小節頭に伸びるサブベースを敷いて土台を作る
+    if (track.sub && i === 0) {
+      this.tone({
+        f0: freq(root - 24), type: 'sine', dur: stepDur * 15,
+        gain: 0.3 * vol, t0: t, dest: g, hold: 0.85,
+      });
+    }
+    if (!kind) return;
+
+    const n = root + (kind === 2 ? 12 : 0);
+    this.tone({
+      f0: freq(n), type: 'sawtooth', dur: stepDur * 0.9,
+      gain: 0.34 * vol, t0: t, dest: g, hold: 0.45,
+    });
+    this.tone({
+      f0: freq(n - 12), type: 'sine', dur: stepDur * 0.95,
+      gain: 0.2 * vol, t0: t, dest: g, hold: 0.4,
+    });
+  }
+
+  /** オフビートのコード刻み。3声をデチューンして重ねる（スーパーソウ）。 */
+  playChords(track, i, chord, t, stepDur) {
+    if (!track.chord[i]) return;
+    const vol = track.gain;
+    for (const n of chord) {
+      for (const d of [-16, 0, 16]) {
+        this.tone({
+          f0: freq(n + 12), type: 'sawtooth', dur: stepDur * 1.6,
+          gain: 0.07 * vol, t0: t, dest: this.leadBus, detune: d, hold: 0.35,
+        });
+      }
+    }
+  }
+
+  /** アルペジオ。8ステップ周期なので拍にロックする。 */
+  playArp(track, i, chord, t, stepDur) {
+    if (!track.arp) return;
+    const idx = ARP_STEPS[i % ARP_STEPS.length];
+    const n = (idx < 3 ? chord[idx] : chord[0] + 12) + 12;
+    this.tone({
+      f0: freq(n), type: 'square', dur: stepDur * 0.55,
+      gain: 0.055 * track.gain, t0: t, dest: this.leadBus,
+    });
+  }
+
+  playLead(track, bar, i, t, stepDur) {
+    const n = track.lead[bar % track.lead.length][i];
+    if (n === null) return;
+    const vol = track.gain;
+    const hold = track.leadHold;
+
+    // 次の音までの長さを測って、そのぶん伸ばす
+    let len = 1;
+    const row = track.lead[bar % track.lead.length];
+    for (let k = i + 1; k < 16 && row[k] === null; k++) len++;
+    const dur = stepDur * Math.min(len, 8) * 0.95;
+
+    if (this.track === 'bonus') {
+      this.tone({ f0: freq(n), type: 'sawtooth', dur, gain: 0.19 * vol, t0: t, dest: this.leadBus, hold });
+      this.tone({ f0: freq(n), type: 'square', dur, gain: 0.09 * vol, t0: t, dest: this.leadBus, detune: 9, hold });
+      this.tone({ f0: freq(n - 12), type: 'triangle', dur, gain: 0.07 * vol, t0: t, dest: this.leadBus, hold });
+    } else {
+      this.tone({ f0: freq(n), type: 'square', dur, gain: 0.14 * vol, t0: t, dest: this.leadBus, hold });
+      this.tone({ f0: freq(n + 12), type: 'triangle', dur, gain: 0.05 * vol, t0: t, dest: this.leadBus, hold });
     }
   }
 }
