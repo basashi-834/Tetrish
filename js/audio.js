@@ -24,10 +24,24 @@ const CHORD = {
   G:  [55, 59, 62],   // G3 B3 D4
   C:  [55, 60, 64],   // G3 C4 E4   … 第2転回。Am と C,E が共通
   E:  [56, 59, 64],   // G#3 B3 E4  … ハーモニックマイナーの緊張
+
+  // 通常時用。ルートをベースに任せた「ルートレスボイシング」で、
+  // 各声部が2半音以内でしか動かないように積んである
+  Am7:   [60, 64, 67],  // C4 E4 G4
+  Dm7:   [60, 65, 69],  // C4 F4 A4   … C は保留、E→F、G→A
+  G7:    [59, 65, 67],  // B3 F4 G4   … C→B、F は保留、A→G
+  Cmaj7: [59, 64, 67],  // B3 E4 G4   … B は保留、F→E、G は保留
 };
 
-/** ベースのルート音。 */
-const ROOT = { Am: 45, F: 41, G: 43, C: 48, E: 40 };
+/**
+ * ベースのルート音。
+ * ベースのパターンは「ルートからの半音差（_ は休符）」で書く。
+ * 0/1/2 のフラグ方式だと動くベースラインが書けない。
+ */
+const ROOT = {
+  Am: 45, F: 41, G: 43, C: 48, E: 40,
+  Am7: 45, Dm7: 38, G7: 43, Cmaj7: 36,
+};
 
 /**
  * アルペジオは8ステップで1周させ、拍にロックさせる。
@@ -36,28 +50,44 @@ const ROOT = { Am: 45, F: 41, G: 43, C: 48, E: 40 };
 const ARP_STEPS = [0, 1, 2, 3, 2, 1, 0, 1];   // 3 = ルートの1オクターブ上
 
 // --- 通常時 ------------------------------------------------------------------
-// ボーナスとの落差が命なので、あえて音数を絞って淡々と回す。
+// ボーナスがユーロビートなので、通常時はあえて別の色にする。
+// パチスロの通常時BGMらしい、ゆったりしたジャズ／ファンク。
+// コードをなぞるだけのメロディ・裏拍ゼロ・伴奏なしだと「ダサい」になる。
 
 const NORMAL = {
-  bpm: 146,
+  bpm: 132,
   bars: 4,
-  prog: ['Am', 'F', 'C', 'G'],
+  swing: 0.14,                                  // 16分を跳ねさせて人間っぽくする
+  prog: ['Am7', 'Dm7', 'G7', 'Cmaj7'],          // vi - ii - V - I のジャズ定番
+
+  // 全部の音を裏拍から入れて、コード構成音より9th/11th/13thを優先する。
+  // 背景で鳴り続けるので音数は少なく、伸ばす。
   lead: [
-    [69,  _,  _, 72,  _,  _, 76,  _,  _,  _, 74,  _, 72,  _,  _,  _],
-    [65,  _,  _, 69,  _,  _, 72,  _,  _,  _, 74,  _, 72,  _,  _,  _],
-    [64,  _,  _, 67,  _,  _, 72,  _,  _,  _, 71,  _, 67,  _,  _,  _],
-    [67,  _,  _, 71,  _,  _, 74,  _,  _,  _, 72,  _, 71,  _, 69,  _],
+    [ _,  _,  _, 72,  _, 74,  _, 76,  _,  _,  _,  _, 79,  _,  _,  _],
+    [ _,  _, 77,  _, 76,  _,  _, 74,  _,  _, 72,  _,  _,  _,  _,  _],
+    [ _,  _,  _, 71,  _,  _, 74,  _, 77,  _, 76,  _,  _,  _,  _,  _],
+    [ _,  _, 76,  _,  _, 72,  _,  _, 71,  _,  _,  _, 69,  _,  _,  _],
   ],
-  // 0=休 1=ルート 2=オクターブ上
-  bass: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0],
-  kick: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+
+  // ルートからの半音差。オクターブ跳躍と、小節尻の下降でうねりを作る
+  bass: [
+    [0,  _,  _, 0,  _,  _, 12,  _,  _, 10,  _,  _, 7,  _, 5,  _],
+    [0,  _,  _, 0,  _,  _, 12,  _,  _, 10,  _,  _, 7,  _, 5,  _],
+    [0,  _,  _, 0,  _,  _, 12,  _,  _, 10,  _, 7,  _, 5,  _, 3],
+    [0,  _,  _, 0,  _,  _, 12,  _,  _, 11,  _,  _, 7,  _,  _, 9],
+  ],
+
+  // 裏拍に短く刺すファンクの刻み
+  chord: [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+  kick:  [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0],
   snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-  hat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-  openHat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  chord: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  hat:   [1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0],
+  openHat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
   arp: false,
   gain: 0.85,
-  leadHold: 0.55,
+  leadHold: 0.8,
+  leadSoft: true,      // 角の立たない音色でそっと鳴らす
+  leadTie: true,       // 小節を跨いで伸ばす
 };
 
 // --- 前兆 --------------------------------------------------------------------
@@ -73,7 +103,7 @@ const TENSION = {
     [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
     [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
   ],
-  bass: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1],
+  bass: [0, _, _, _, 0, _, _, _, 0, _, _, _, 0, _, 0, 0],
   kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
   snare: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   hat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1],
@@ -111,8 +141,8 @@ const BONUS = {
     // 駆け下りて頭へ戻る（G# が A を引っ張る）
     [88,  _, 86,  _, 84,  _, 80,  _, 83,  _, 80,  _, 76,  _, 71,  _],
   ],
-  // ガロップベース：キックの裏に16分を2つ差し込む
-  bass: [0, 0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2],
+  // ガロップベース：キックの裏に16分を2つ差し込む（0=ルート、12=オクターブ上）
+  bass: [_, _, 0, 12, _, _, 0, 12, _, _, 0, 12, _, _, 0, 12],
   kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
   clap: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
   hat: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -577,7 +607,7 @@ export class AudioEngine {
     }
   }
 
-  playStep(step, t, stepDur) {
+  playStep(step, rawTime, stepDur) {
     const track = TRACKS[this.track] || NORMAL;
     const bar = (step >> 4) % track.bars;
     const i = step & 15;
@@ -585,8 +615,13 @@ export class AudioEngine {
     const chord = CHORD[name];
     const root = ROOT[name];
 
+    // 16分の裏を少し後ろへ倒すと、機械的な等間隔から抜けて跳ねて聞こえる
+    const t = track.swing && i % 2 === 1
+      ? rawTime + stepDur * track.swing
+      : rawTime;
+
     this.playDrums(track, i, bar, t);
-    this.playBassLine(track, i, root, t, stepDur);
+    this.playBassLine(track, bar, i, root, t, stepDur);
     this.playChords(track, i, chord, t, stepDur);
     this.playArp(track, i, chord, t, stepDur);
     this.playLead(track, bar, i, t, stepDur);
@@ -638,10 +673,12 @@ export class AudioEngine {
     }
   }
 
-  playBassLine(track, i, root, t, stepDur) {
+  playBassLine(track, bar, i, root, t, stepDur) {
     const g = this.musicGain;
     const vol = track.gain;
-    const kind = track.bass[i];
+    // 小節ごとに違うラインを書ける形式にも、1小節を使い回す形式にも対応する
+    const row = Array.isArray(track.bass[0]) ? track.bass[bar % track.bass.length] : track.bass;
+    const offset = row[i];
 
     // 小節頭に伸びるサブベースを敷いて土台を作る
     if (track.sub && i === 0) {
@@ -650,9 +687,9 @@ export class AudioEngine {
         gain: 0.3 * vol, t0: t, dest: g, hold: 0.85,
       });
     }
-    if (!kind) return;
+    if (offset === null || offset === undefined) return;
 
-    const n = root + (kind === 2 ? 12 : 0);
+    const n = root + offset;
     this.tone({
       f0: freq(n), type: 'sawtooth', dur: stepDur * 0.9,
       gain: 0.34 * vol, t0: t, dest: g, hold: 0.45,
@@ -663,10 +700,28 @@ export class AudioEngine {
     });
   }
 
-  /** オフビートのコード刻み。3声をデチューンして重ねる（スーパーソウ）。 */
+  /**
+   * コード刻み。
+   * ボーナスは3声デチューンのスーパーソウ、通常時は短く刺すファンクの刻み。
+   */
   playChords(track, i, chord, t, stepDur) {
     if (!track.chord[i]) return;
     const vol = track.gain;
+
+    if (track.leadSoft) {
+      for (const n of chord) {
+        this.tone({
+          f0: freq(n), type: 'triangle', dur: stepDur * 0.75,
+          gain: 0.11 * vol, t0: t, dest: this.leadBus, attack: 0.006,
+        });
+        this.tone({
+          f0: freq(n), type: 'square', dur: stepDur * 0.5,
+          gain: 0.035 * vol, t0: t, dest: this.leadBus,
+        });
+      }
+      return;
+    }
+
     for (const n of chord) {
       for (const d of [-16, 0, 16]) {
         this.tone({
@@ -689,18 +744,32 @@ export class AudioEngine {
   }
 
   playLead(track, bar, i, t, stepDur) {
-    const n = track.lead[bar % track.lead.length][i];
+    const rows = track.lead;
+    const row = rows[bar % rows.length];
+    const n = row[i];
     if (n === null) return;
     const vol = track.gain;
     const hold = track.leadHold;
 
-    // 次の音までの長さを測って、そのぶん伸ばす
+    // 次の音までの長さを測って、そのぶん伸ばす。
+    // leadTie を立てたトラックは小節線を跨いで伸ばす（跨がないと小節尻が必ず切れる）。
+    // ボーナス曲は既に仕上がっているので、あえて従来どおり小節内で閉じる。
+    const nextRow = rows[(bar + 1) % rows.length];
+    const limit = track.leadTie ? 32 : 16;
     let len = 1;
-    const row = track.lead[bar % track.lead.length];
-    for (let k = i + 1; k < 16 && row[k] === null; k++) len++;
-    const dur = stepDur * Math.min(len, 8) * 0.95;
+    for (let k = i + 1; k < limit && len < 12; k++) {
+      const v = k < 16 ? row[k] : nextRow[k - 16];
+      if (v !== null) break;
+      len++;
+    }
+    const dur = stepDur * len * 0.95;
 
-    if (this.track === 'bonus') {
+    if (track.leadSoft) {
+      // 背景で鳴るので、立ち上がりを遅らせて角を取る
+      this.tone({ f0: freq(n), type: 'triangle', dur, gain: 0.17 * vol, t0: t, dest: this.leadBus, hold, attack: 0.02 });
+      this.tone({ f0: freq(n), type: 'sine', dur, gain: 0.1 * vol, t0: t, dest: this.leadBus, hold, attack: 0.03 });
+      this.tone({ f0: freq(n + 12), type: 'triangle', dur: dur * 0.6, gain: 0.025 * vol, t0: t, dest: this.leadBus, hold, attack: 0.02 });
+    } else if (this.track === 'bonus') {
       this.tone({ f0: freq(n), type: 'sawtooth', dur, gain: 0.19 * vol, t0: t, dest: this.leadBus, hold });
       this.tone({ f0: freq(n), type: 'square', dur, gain: 0.09 * vol, t0: t, dest: this.leadBus, detune: 9, hold });
       this.tone({ f0: freq(n - 12), type: 'triangle', dur, gain: 0.07 * vol, t0: t, dest: this.leadBus, hold });
